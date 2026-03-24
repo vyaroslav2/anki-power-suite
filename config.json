@@ -1,0 +1,7 @@
+{
+    "enable_line_formatter": true,
+    "enable_smart_trim": true,
+    "hotkeys": {
+        "line_formatter": "Alt+Shift+Q"
+    }
+}

@@ -11,13 +11,14 @@ window.PowerSuite.formatCurrentLine = function () {
   if (!editableRoot) return;
 
   window.PowerSuite.isProcessing = true;
+  let sel; // Declare selection outside so the finally block can use it
 
   try {
     const indent = "\u00A0\u00A0\u00A0\u00A0";
     const indentRegex = /^(?:<span[^>]*><\/span>)*(?:\s|&nbsp;|\u00A0){4}/i;
 
     const rootNode = editableRoot.getRootNode();
-    const sel = rootNode.getSelection
+    sel = rootNode.getSelection
       ? rootNode.getSelection()
       : window.getSelection();
     if (!sel || !sel.rangeCount) {
@@ -107,13 +108,10 @@ window.PowerSuite.formatCurrentLine = function () {
 
     const scope = allLines.slice(low, high + 1);
 
-    if (scope.some((line) => line.innerHTML.includes("{{c"))) {
-      window.PowerSuite.log(
-        "Cloze deletion detected. Aborting format.",
-        "warn",
-      );
-      window.PowerSuite.isProcessing = false;
-      return;
+    // FIX 2: Use textContent instead of innerHTML so HTML markers don't split the {{c
+    if (scope.some((line) => line.textContent.includes("{{c"))) {
+      // Throw a specific error so we skip formatting, but still hit the finally block
+      throw new Error("CLOZE_ABORT");
     }
 
     const refLine =
@@ -155,19 +153,32 @@ window.PowerSuite.formatCurrentLine = function () {
 
       if (line.innerHTML.trim() === "") line.innerHTML = "<br>";
     });
-
+  } catch (e) {
+    if (e.message === "CLOZE_ABORT") {
+      window.PowerSuite.log(
+        "Cloze deletion detected. Aborting format.",
+        "warn",
+      );
+    } else {
+      window.PowerSuite.log("FORMATTER ERROR: " + e, "error");
+    }
+  } finally {
+    // FIX 1: Restore the cursor BEFORE deleting the markers, no matter what happened
     const finalStart = editableRoot.querySelector(".anki-fmt-start");
     const finalEnd = editableRoot.querySelector(".anki-fmt-end");
-    if (finalStart && finalEnd) {
-      const finalRange = document.createRange();
-      finalRange.setStartAfter(finalStart);
-      finalRange.setEndBefore(finalEnd);
-      sel.removeAllRanges();
-      sel.addRange(finalRange);
+    if (finalStart && finalEnd && sel) {
+      try {
+        const finalRange = document.createRange();
+        finalRange.setStartAfter(finalStart);
+        finalRange.setEndBefore(finalEnd);
+        sel.removeAllRanges();
+        sel.addRange(finalRange);
+      } catch (err) {
+        // Silently ignore if range can't be restored
+      }
     }
-  } catch (e) {
-    window.PowerSuite.log("FORMATTER ERROR: " + e, "error");
-  } finally {
+
+    // Now safely remove the markers
     editableRoot
       .querySelectorAll(".anki-fmt-start, .anki-fmt-end")
       .forEach((m) => m.remove());
@@ -175,7 +186,6 @@ window.PowerSuite.formatCurrentLine = function () {
     window.PowerSuite.isProcessing = false; // ALWAYS UNLOCK
   }
 };
-
 // ==========================================
 // 2. AI TRANSLATOR (F8 / Ctrl+F10)
 // ==========================================

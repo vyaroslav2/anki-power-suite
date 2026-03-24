@@ -1,0 +1,14 @@
+# Ignore the real config containing secrets
+config.json
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore log files
+*.log
+debug.log
+
+# Ignore OS files
+.DS_Store
+Thumbs.db

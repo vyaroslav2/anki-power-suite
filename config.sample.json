@@ -1,0 +1,15 @@
+{
+  "enable_line_formatter": true,
+  "enable_smart_trim": false,
+  "enable_ai_translator": true,
+  "hotkeys": {
+    "line_formatter": "Alt+Shift+Q",
+    "ai_translator": "F8",
+    "ai_combo": "Ctrl+F10"
+  },
+  "ai_settings": {
+    "gemini_api_key": "YOUR_API_KEY_HERE",
+    "model_name": "gemini-2.5-flash",
+    "prompt_prefix": "Translate into natural Russian. Provide only the translation without any explanations."
+  }
+}

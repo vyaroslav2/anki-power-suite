@@ -295,3 +295,116 @@ window.PowerSuite.aiInjectCloze = function (translated) {
 
   return true;
 };
+// ==========================================
+// 3. TTS PIPELINE (F9 / Combo)
+// ==========================================
+window.PowerSuite.ttsGetText = function () {
+  if (window.PowerSuite.isProcessing) {
+    window.PowerSuite.log("System is busy. Ignoring TTS request.", "warn");
+    return "";
+  }
+
+  const activeEl = window.PowerSuite.getEditableRoot();
+  if (!activeEl) return "";
+
+  window.PowerSuite.isProcessing = true; // LOCK
+  const rootNode = activeEl.getRootNode();
+  const sel = rootNode.getSelection
+    ? rootNode.getSelection()
+    : window.getSelection();
+
+  if (!sel || !sel.rangeCount) {
+    window.PowerSuite.isProcessing = false;
+    return "";
+  }
+
+  let extractedText = sel.toString();
+  if (!extractedText.trim()) {
+    let anchor = sel.anchorNode;
+    if (anchor) {
+      let blockElement = anchor.nodeType === 3 ? anchor.parentNode : anchor;
+      while (
+        blockElement &&
+        blockElement !== activeEl &&
+        !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
+          blockElement.nodeName.toUpperCase(),
+        )
+      ) {
+        blockElement = blockElement.parentNode;
+      }
+      if (!blockElement) blockElement = activeEl;
+      extractedText = blockElement.innerText || blockElement.textContent || "";
+    }
+  }
+
+  if (!extractedText.trim()) {
+    window.PowerSuite.isProcessing = false;
+    return "";
+  }
+
+  // Strip parentheses and their contents
+  let filteredText = extractedText.replace(/\([^)]*\)/g, " ");
+  filteredText = filteredText.replace(/\s{2,}/g, " ").trim();
+
+  if (!filteredText) {
+    window.PowerSuite.isProcessing = false;
+    return "";
+  }
+
+  window.PowerSuite.log("TTS Text extracted successfully.", "info");
+  return filteredText;
+};
+
+window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
+  function getAllEditableFields(root) {
+    const results = [];
+    const directHits = root.querySelectorAll(
+      '[contenteditable="true"], .field',
+    );
+    directHits.forEach((el) => {
+      if (!results.includes(el)) results.push(el);
+    });
+
+    const allElements = root.querySelectorAll("*");
+    allElements.forEach((el) => {
+      if (el.shadowRoot) {
+        const shadowHits = getAllEditableFields(el.shadowRoot);
+        shadowHits.forEach((hit) => {
+          if (!results.includes(hit)) results.push(hit);
+        });
+      }
+    });
+    return results;
+  }
+
+  const editables = getAllEditableFields(document).filter(
+    (el) =>
+      el.getAttribute("contenteditable") === "true" ||
+      el.classList.contains("editable"),
+  );
+
+  if (editables.length === 0 || targetIndex >= editables.length) {
+    window.PowerSuite.log(`Target field [${targetIndex}] not found.`, "error");
+    window.PowerSuite.isProcessing = false; // Unlock
+    return;
+  }
+
+  const targetField = editables[targetIndex];
+  let currentHtml = targetField.innerHTML || "";
+  currentHtml = currentHtml.replace(/(<br\s*\/?>|\s)+$/gi, "");
+
+  targetField.innerHTML = currentHtml + `[sound:${filename}]`;
+
+  targetField.dispatchEvent(
+    new InputEvent("input", { bubbles: true, composed: true }),
+  );
+  targetField.dispatchEvent(
+    new Event("change", { bubbles: true, composed: true }),
+  );
+
+  window.PowerSuite.log(
+    `Injected [sound:${filename}] into field index ${targetIndex}.`,
+    "success",
+  );
+  window.PowerSuite.isProcessing = false; // UNLOCK!
+};

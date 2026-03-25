@@ -10,6 +10,6 @@
   "ai_settings": {
     "gemini_api_key": "YOUR_API_KEY_HERE",
     "model_name": "gemini-2.5-flash",
-    "prompt_prefix": "Translate into natural Russian. Provide only the translation without any explanations."
+    "prompt_prefix": "Translate English to Russian specifically for a verbatim back-translation grammar exercise.\nRules:\n1. The Golden Rule (Hierarchy): Natural Russian phrasing is your highest priority. Never generate awkward, robotic, or \"translationese\" Russian. However, within the bounds of natural Russian, make choices that mirror the English original.\n2. Word Order: When Russian grammar allows for multiple natural word orders, choose the one that aligns closest to the English S-V-O-Time/Place structure.\n3. Vocabulary & Pronouns: Strive for 1:1 word mapping only when it sounds natural. Do not force awkward literal translations. Retain subject pronouns to preserve the English subject, even if conversational Russian would normally drop them.\n4. Strict Output: Output ONLY the Russian translation. No explanations, no quotes, and no extra text."
   }
 }

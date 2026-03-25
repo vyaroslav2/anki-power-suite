@@ -3,8 +3,79 @@ window.PowerSuite.initPassiveListeners = function () {
   window.PowerSuite._listenersInitialized = true;
 
   window.PowerSuite.log(
-    "Initializing Smart Editor (Array Mapping Engine)...",
+    "Initializing Smart Editor (Array Engine + Source Tracking)...",
     "info",
+  );
+
+  // ==========================================
+  // INVISIBLE MASK UTILITY
+  // ==========================================
+  const toggleMask = (hide) => {
+    const STYLE_ID = "powersuite-invisible-mask";
+    const css = `
+            ::selection { background: transparent !important; color: inherit !important; }
+            *::selection { background: transparent !important; color: inherit !important; }
+        `;
+
+    const roots = [document.head];
+    const editableRoot = window.PowerSuite.getEditableRoot();
+    if (editableRoot && editableRoot.getRootNode() !== document) {
+      roots.push(editableRoot.getRootNode());
+    }
+
+    roots.forEach((root) => {
+      let styleEl = root.querySelector(`#${STYLE_ID}`);
+      if (hide) {
+        if (!styleEl) {
+          styleEl = document.createElement("style");
+          styleEl.id = STYLE_ID;
+          styleEl.textContent = css;
+          root.appendChild(styleEl);
+        }
+      } else {
+        if (styleEl) styleEl.remove();
+      }
+    });
+  };
+
+  let maskTimeout;
+  const applyTemporaryMask = () => {
+    toggleMask(true);
+    clearTimeout(maskTimeout);
+    maskTimeout = setTimeout(() => toggleMask(false), 120);
+  };
+
+  // ==========================================
+  // SOURCE TRACKER
+  // ==========================================
+  let lastSelectionSource = "mouse";
+
+  document.addEventListener(
+    "mousedown",
+    (e) => {
+      if (e.detail >= 2) {
+        lastSelectionSource = "doubleclick";
+        applyTemporaryMask(); // ONLY mask on double clicks to prevent keyboard flickering
+      } else {
+        lastSelectionSource = "click";
+      }
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      // Word Selection (Ctrl+Shift+Right) -> Enable Trimming!
+      if (e.shiftKey && (e.ctrlKey || e.metaKey) && e.key === "ArrowRight") {
+        lastSelectionSource = "keyboard_word_forward";
+      }
+      // Character Selection (Shift+Right) or Backward Selection -> Disable Trimming
+      else if (e.shiftKey || e.key.includes("Arrow") || e.ctrlKey) {
+        lastSelectionSource = "keyboard_manual";
+      }
+    },
+    true,
   );
 
   // ==========================================
@@ -13,6 +84,13 @@ window.PowerSuite.initPassiveListeners = function () {
   let trimTimeout;
   document.addEventListener("selectionchange", () => {
     if (window.PowerSuite.isProcessing) return;
+
+    // ONLY trim if the user double-clicked OR pressed Ctrl+Shift+Right
+    if (
+      lastSelectionSource !== "doubleclick" &&
+      lastSelectionSource !== "keyboard_word_forward"
+    )
+      return;
 
     clearTimeout(trimTimeout);
     trimTimeout = setTimeout(() => {
@@ -26,12 +104,18 @@ window.PowerSuite.initPassiveListeners = function () {
         ? rootNode.getSelection()
         : window.getSelection();
 
-      if (!sel || sel.rangeCount === 0) return;
-      if (sel.getRangeAt(0).collapsed) return;
+      if (!sel || sel.rangeCount === 0 || sel.getRangeAt(0).collapsed) return;
+
+      // BUGFIX: Only trim if the selection was made FORWARD.
+      // Extending backward on a backward-selection grabs the wrong text!
+      const range = sel.getRangeAt(0);
+      const isForward =
+        sel.focusNode === range.endContainer &&
+        sel.focusOffset === range.endOffset;
+      if (!isForward) return;
 
       let text = sel.toString();
-      // If it's pure spaces, or a large multi-word selection (like Ctrl+A), LEAVE IT ALONE!
-      if (/^[\s\u00A0]+$/.test(text) || text.trim().includes(" ")) return;
+      if (/^[\s\u00A0]+$/.test(text)) return;
 
       let trimmed = false;
       let sanity = 10;
@@ -42,13 +126,12 @@ window.PowerSuite.initPassiveListeners = function () {
       }
 
       if (trimmed) window.PowerSuite.log("Trimmed trailing space.", "success");
-    }, 50);
+    }, 10); // 10ms delay makes keyboard trimming virtually instant
   });
 
   // ==========================================
   // FEATURE 2: OBSIDIAN STYLE BOLD/ITALIC
   // ==========================================
-  // Creates a seamless coordinate map of the DOM
   const getDOMMap = (block) => {
     let text = "";
     let nodes = [];
@@ -125,13 +208,11 @@ window.PowerSuite.initPassiveListeners = function () {
 
       if (!sel || sel.rangeCount === 0) return;
 
-      // BULLETPROOF FIX: If user highlighted ANYTHING intentionally, abort perfectly!
       if (!sel.getRangeAt(0).collapsed || sel.toString().length > 0) return;
 
       let targetNode = sel.anchorNode;
       let targetOffset = sel.anchorOffset;
 
-      // TOGGLE TRAP FIX: If cursor is resting on an HTML Element instead of text, drill down to the text!
       if (targetNode.nodeType !== Node.TEXT_NODE) {
         if (targetNode.childNodes.length > targetOffset) {
           targetNode = targetNode.childNodes[targetOffset];
@@ -147,7 +228,6 @@ window.PowerSuite.initPassiveListeners = function () {
       }
       if (targetNode.nodeType !== Node.TEXT_NODE) return;
 
-      // Get paragraph block
       let block = targetNode;
       while (
         block &&
@@ -160,10 +240,8 @@ window.PowerSuite.initPassiveListeners = function () {
       }
       if (!block) block = editableRoot;
 
-      // 1. Build coordinate map
       const { text, nodes } = getDOMMap(block);
 
-      // Find cursor coordinate
       let absOffset = -1;
       for (const item of nodes) {
         if (item.node === targetNode) {
@@ -173,7 +251,6 @@ window.PowerSuite.initPassiveListeners = function () {
       }
       if (absOffset === -1) return;
 
-      // 2. Do the math
       const isWordChar = (char) => char && /[\p{L}\p{N}_]/u.test(char);
 
       let start = absOffset;
@@ -182,28 +259,23 @@ window.PowerSuite.initPassiveListeners = function () {
       let end = absOffset;
       while (end < text.length && isWordChar(text[end])) end++;
 
-      // If cursor is floating in space, let Anki natively format the next typed word
       if (start === end) return;
 
       e.preventDefault();
-      window.PowerSuite.isProcessing = true; // LOCK
+      window.PowerSuite.isProcessing = true;
 
       try {
-        // 3. Highlight exactly using coordinates
         setMappedSelection(sel, nodes, start, end);
 
-        // 4. Format
         let command = "bold";
         if (isItalic) command = "italic";
         if (isUnderline) command = "underline";
         document.execCommand(command, false, null);
 
-        // 5. Save changes
         editableRoot.dispatchEvent(
           new InputEvent("input", { bubbles: true, composed: true }),
         );
 
-        // 6. Restore Cursor EXACTLY where it was using a fresh map of the new DOM
         const newMap = getDOMMap(block);
         setMappedSelection(sel, newMap.nodes, absOffset, absOffset);
 
@@ -211,7 +283,7 @@ window.PowerSuite.initPassiveListeners = function () {
       } catch (err) {
         window.PowerSuite.log(`Smart Format Error: ${err}`, "error");
       } finally {
-        window.PowerSuite.isProcessing = false; // UNLOCK
+        window.PowerSuite.isProcessing = false;
       }
     },
     true,

@@ -3,12 +3,12 @@ window.PowerSuite.initPassiveListeners = function () {
   window.PowerSuite._listenersInitialized = true;
 
   window.PowerSuite.log(
-    "Initializing Smart Editor (Array Engine + Source Tracking)...",
+    "Initializing Smart Editor (Unified Final Engine)...",
     "info",
   );
 
   // ==========================================
-  // INVISIBLE MASK UTILITY
+  // INVISIBLE MASK UTILITY (For Mouse Only)
   // ==========================================
   const toggleMask = (hide) => {
     const STYLE_ID = "powersuite-invisible-mask";
@@ -45,9 +45,6 @@ window.PowerSuite.initPassiveListeners = function () {
     maskTimeout = setTimeout(() => toggleMask(false), 120);
   };
 
-  // ==========================================
-  // SOURCE TRACKER
-  // ==========================================
   let lastSelectionSource = "mouse";
 
   document.addEventListener(
@@ -55,7 +52,7 @@ window.PowerSuite.initPassiveListeners = function () {
     (e) => {
       if (e.detail >= 2) {
         lastSelectionSource = "doubleclick";
-        applyTemporaryMask(); // ONLY mask on double clicks to prevent keyboard flickering
+        applyTemporaryMask();
       } else {
         lastSelectionSource = "click";
       }
@@ -63,34 +60,15 @@ window.PowerSuite.initPassiveListeners = function () {
     true,
   );
 
-  document.addEventListener(
-    "keydown",
-    (e) => {
-      // Word Selection (Ctrl+Shift+Right) -> Enable Trimming!
-      if (e.shiftKey && (e.ctrlKey || e.metaKey) && e.key === "ArrowRight") {
-        lastSelectionSource = "keyboard_word_forward";
-      }
-      // Character Selection (Shift+Right) or Backward Selection -> Disable Trimming
-      else if (e.shiftKey || e.key.includes("Arrow") || e.ctrlKey) {
-        lastSelectionSource = "keyboard_manual";
-      }
-    },
-    true,
-  );
-
   // ==========================================
-  // FEATURE 1: NO TRAILING SPACE ON SELECTION
+  // FEATURE 1: ASYNC TRIMMER (For Mouse Only)
   // ==========================================
   let trimTimeout;
   document.addEventListener("selectionchange", () => {
     if (window.PowerSuite.isProcessing) return;
 
-    // ONLY trim if the user double-clicked OR pressed Ctrl+Shift+Right
-    if (
-      lastSelectionSource !== "doubleclick" &&
-      lastSelectionSource !== "keyboard_word_forward"
-    )
-      return;
+    // ONLY mask and trim on double clicks!
+    if (lastSelectionSource !== "doubleclick") return;
 
     clearTimeout(trimTimeout);
     trimTimeout = setTimeout(() => {
@@ -106,8 +84,6 @@ window.PowerSuite.initPassiveListeners = function () {
 
       if (!sel || sel.rangeCount === 0 || sel.getRangeAt(0).collapsed) return;
 
-      // BUGFIX: Only trim if the selection was made FORWARD.
-      // Extending backward on a backward-selection grabs the wrong text!
       const range = sel.getRangeAt(0);
       const isForward =
         sel.focusNode === range.endContainer &&
@@ -115,7 +91,7 @@ window.PowerSuite.initPassiveListeners = function () {
       if (!isForward) return;
 
       let text = sel.toString();
-      if (/^[\s\u00A0]+$/.test(text)) return;
+      if (/^[\s\u00A0]+$/.test(text) || text.trim().includes(" ")) return;
 
       let trimmed = false;
       let sanity = 10;
@@ -125,12 +101,12 @@ window.PowerSuite.initPassiveListeners = function () {
         trimmed = true;
       }
 
-      if (trimmed) window.PowerSuite.log("Trimmed trailing space.", "success");
-    }, 10); // 10ms delay makes keyboard trimming virtually instant
+      if (trimmed) window.PowerSuite.log("Mouse selection trimmed.", "success");
+    }, 10);
   });
 
   // ==========================================
-  // FEATURE 2: OBSIDIAN STYLE BOLD/ITALIC
+  // FEATURE 2: DOM MAPPING ENGINE
   // ==========================================
   const getDOMMap = (block) => {
     let text = "";
@@ -155,9 +131,7 @@ window.PowerSuite.initPassiveListeners = function () {
         n.nodeName === "DIV" ||
         n.nodeName === "P"
       ) {
-        if (text.length > 0 && text[text.length - 1] !== " ") {
-          text += " ";
-        }
+        if (text.length > 0 && text[text.length - 1] !== " ") text += " ";
       }
     }
     return { text, nodes };
@@ -188,9 +162,55 @@ window.PowerSuite.initPassiveListeners = function () {
     }
   };
 
+  // ==========================================
+  // MAIN KEYBOARD CONTROLLER
+  // ==========================================
   document.addEventListener(
     "keydown",
     (e) => {
+      // --- 1. SYNCHRONOUS HIJACK: Ctrl+Shift+Right (Wall-Breaker) ---
+      if (e.shiftKey && (e.ctrlKey || e.metaKey) && e.key === "ArrowRight") {
+        if (window.PowerSuite.isProcessing) return;
+        const editableRoot = window.PowerSuite.getEditableRoot();
+        if (!editableRoot) return;
+        const rootNode = editableRoot.getRootNode();
+        const sel = rootNode.getSelection
+          ? rootNode.getSelection()
+          : window.getSelection();
+        if (!sel) return;
+
+        e.preventDefault();
+        lastSelectionSource = "keyboard_hijack";
+
+        const prevText = sel.toString();
+        sel.modify("extend", "forward", "word");
+
+        // The Wall Breaker!
+        let loopProtect = 10;
+        while (
+          sel.toString().length > prevText.length &&
+          /^[\s\u00A0]*$/.test(sel.toString().slice(prevText.length)) &&
+          loopProtect-- > 0
+        ) {
+          sel.modify("extend", "forward", "word");
+        }
+
+        // Sync trim space
+        let text = sel.toString();
+        let sanity = 10;
+        while (text.length > 0 && /[\s\u00A0]$/.test(text) && sanity-- > 0) {
+          sel.modify("extend", "backward", "character");
+          text = sel.toString();
+        }
+        return;
+      }
+
+      // --- 2. Track other keyboard movements ---
+      if (e.shiftKey || e.key.includes("Arrow")) {
+        lastSelectionSource = "keyboard";
+      }
+
+      // --- 3. OBSIDIAN FORMATTING TOGGLES ---
       const isBold = e.key.toLowerCase() === "b";
       const isItalic = e.key.toLowerCase() === "i";
       const isUnderline = e.key.toLowerCase() === "u";
@@ -200,14 +220,13 @@ window.PowerSuite.initPassiveListeners = function () {
 
       const editableRoot = window.PowerSuite.getEditableRoot();
       if (!editableRoot) return;
-
       const rootNode = editableRoot.getRootNode();
       const sel = rootNode.getSelection
         ? rootNode.getSelection()
         : window.getSelection();
-
       if (!sel || sel.rangeCount === 0) return;
 
+      // Abort if intentionally highlighted
       if (!sel.getRangeAt(0).collapsed || sel.toString().length > 0) return;
 
       let targetNode = sel.anchorNode;

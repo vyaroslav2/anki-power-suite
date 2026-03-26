@@ -212,8 +212,11 @@ window.PowerSuite.aiGetText = function () {
   }
 
   let extractedText = sel.toString();
+  let isAutoExpanded = false;
 
+  // AUTO-EXPAND IF CURSOR IS JUST PLACED ON A LINE
   if (extractedText.trim().length === 0) {
+    isAutoExpanded = true;
     let anchor = sel.anchorNode;
     if (!anchor) {
       window.PowerSuite.isProcessing = false;
@@ -245,19 +248,41 @@ window.PowerSuite.aiGetText = function () {
     return "";
   }
 
-  const leadingMatch = extractedText.match(/^[\s\u00A0]+/);
+  // --- NEW LOGIC: SMART PARENTHESES SPLITTING ---
+  let targetForCloze = extractedText;
+  let leftover = "";
+
+  // Only apply smart-split if the user didn't manually select the text
+  if (isAutoExpanded) {
+    // Regex matches: 1. Core text, 2. Spaces before parenthesis, 3. The '(' and everything after
+    const splitMatch = extractedText.match(/^([\s\S]*?)(\s*)(\([\s\S]*)$/);
+
+    // Make sure we aren't completely eliminating the text (e.g., if line ONLY had "(hint)")
+    if (splitMatch && splitMatch[1].trim().length > 0) {
+      targetForCloze = splitMatch[1];
+      leftover = splitMatch[2] + splitMatch[3]; // Preserves original spacing + parenthesis block
+    }
+  }
+  // ----------------------------------------------
+
+  // Handle prefix/suffix spaces correctly around the target text
+  const leadingMatch = targetForCloze.match(/^[\s\u00A0]+/);
   const prefix = leadingMatch ? leadingMatch[0] : "";
-  const trailingMatch = extractedText.match(/[\s\u00A0]+$/);
+  const trailingMatch = targetForCloze.match(/[\s\u00A0]+$/);
   const suffix = trailingMatch ? trailingMatch[0] : "";
-  const cleanText = extractedText.trim();
+  const cleanText = targetForCloze.trim();
 
   window.PowerSuite.aiToken = "[[AI_TRANSLATING_" + Date.now() + "]]";
-  const skeleton = `${prefix}{{c1::${cleanText}::${window.PowerSuite.aiToken}}}${suffix}`;
+
+  // Notice we now append 'leftover' completely OUTSIDE the cloze tag
+  const skeleton = `${prefix}{{c1::${cleanText}::${window.PowerSuite.aiToken}}}${suffix}${leftover}`;
 
   document.execCommand("removeFormat", false, null);
   document.execCommand("insertText", false, skeleton);
 
   window.PowerSuite.log("AI Placeholder injected.", "info");
+
+  // We return cleanText so Python sends ONLY the sentence to Gemini/ElevenLabs!
   return cleanText;
 };
 

@@ -443,3 +443,87 @@ window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
   );
   window.PowerSuite.isProcessing = false; // UNLOCK!
 };
+// ==========================================
+// 4. CLOZE UNWRAPPER (Alt+Shift+U)
+// ==========================================
+window.PowerSuite.unwrapCloze = function () {
+  if (window.PowerSuite.isProcessing) return;
+
+  const activeEl = window.PowerSuite.getEditableRoot();
+  if (!activeEl) return;
+
+  const rootNode = activeEl.getRootNode();
+  const sel = rootNode.getSelection
+    ? rootNode.getSelection()
+    : window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+
+  // 1. Find the current block
+  let anchor = sel.anchorNode;
+  if (!anchor) return;
+
+  let blockElement = anchor.nodeType === 3 ? anchor.parentNode : anchor;
+  while (
+    blockElement &&
+    blockElement !== activeEl &&
+    !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
+      blockElement.nodeName.toUpperCase(),
+    )
+  ) {
+    blockElement = blockElement.parentNode;
+  }
+  if (!blockElement) blockElement = activeEl;
+
+  const originalHtml = blockElement.innerHTML;
+
+  // Regex matches: {{c(numbers)::(Target Text)::(Hint Text)}} and captures ONLY (Target Text)
+  // It also safely handles cases where there is no hint text.
+  const unwrapRegex = /\{\{c\d+::(.*?)(?:::.*?)?\}\}/g;
+
+  if (!unwrapRegex.test(originalHtml)) {
+    window.PowerSuite.log("No cloze deletions found on this line.", "warn");
+    return;
+  }
+
+  // Strip the cloze formatting
+  blockElement.innerHTML = originalHtml.replace(unwrapRegex, "$1");
+  blockElement.dispatchEvent(
+    new InputEvent("input", { bubbles: true, composed: true }),
+  );
+
+  // 2. Cleanup Audio Tag (Looks for the last [sound:eleven_...] tag in the whole editor and removes it)
+  function getAllEditableFields(root) {
+    const results = [];
+    root
+      .querySelectorAll('[contenteditable="true"], .field')
+      .forEach((el) => results.push(el));
+    root.querySelectorAll("*").forEach((el) => {
+      if (el.shadowRoot)
+        getAllEditableFields(el.shadowRoot).forEach((hit) => results.push(hit));
+    });
+    return results;
+  }
+
+  const editables = getAllEditableFields(document).filter(
+    (el) =>
+      el.getAttribute("contenteditable") === "true" ||
+      el.classList.contains("editable"),
+  );
+
+  // We check all fields from bottom to top (usually audio is in field 2 or 3)
+  for (let i = editables.length - 1; i >= 0; i--) {
+    let fieldHtml = editables[i].innerHTML;
+    // Matches the most recently added ElevenLabs sound tag
+    const audioRegex = /\[sound:eleven_[a-f0-9]+\.mp3\](?=[^\[]*$)/;
+    if (audioRegex.test(fieldHtml)) {
+      editables[i].innerHTML = fieldHtml.replace(audioRegex, "");
+      editables[i].dispatchEvent(
+        new InputEvent("input", { bubbles: true, composed: true }),
+      );
+      window.PowerSuite.log("Removed orphaned audio tag.", "info");
+      break; // Only remove one tag per unwrap!
+    }
+  }
+
+  window.PowerSuite.log("Cloze unwrapped successfully.", "success");
+};

@@ -4,6 +4,7 @@ config.json
 # Ignore Python cache
 __pycache__/
 *.pyc
+*.pyo
 
 # Ignore log files
 *.log

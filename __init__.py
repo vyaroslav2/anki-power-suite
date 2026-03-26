@@ -128,6 +128,11 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
 
     editor.web.evalWithCallback("window.PowerSuite.aiGetText()", handle_extracted_text)
 
+# --- UNWRAPPER UTILITY ---
+def trigger_unwrapper(editor: Editor):
+    inject_js(editor)
+    editor.web.eval("window.PowerSuite.unwrapCloze();")
+
 
 def on_setup_shortcuts(shortcuts: list[tuple], editor: Editor):
     config = load_config()
@@ -143,5 +148,8 @@ def on_setup_shortcuts(shortcuts: list[tuple], editor: Editor):
         shortcuts.append((hotkeys.get("ai_translator", "F8"), lambda: trigger_ai_pipeline(editor, is_combo=False)))
         shortcuts.append((hotkeys.get("ai_combo", "Ctrl+F10"), lambda: trigger_ai_pipeline(editor, is_combo=True)))
 
+    if "unwrap_cloze" in hotkeys:
+        shortcuts.append((hotkeys["unwrap_cloze"], lambda: trigger_unwrapper(editor)))
+        
 gui_hooks.editor_did_init.append(on_editor_init)
 gui_hooks.editor_did_init_shortcuts.append(on_setup_shortcuts)

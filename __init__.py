@@ -71,9 +71,15 @@ def trigger_tts_standalone(editor: Editor):
     inject_js(editor)
     config = load_config()
     
+    # Grab the model name just for the tooltip!
+    tts_settings = config.get("tts_settings", {})
+    active_model = tts_settings.get("model_id", "Unknown Model")
+    
     def handle_text(selected_text):
         if not selected_text: return
-        tooltip("Fetching ElevenLabs Audio...")
+        
+        # Now the Anki tooltip will literally say: "Fetching Audio (eleven_v3)..."
+        tooltip(f"Fetching Audio ({active_model})...")
         run_tts_process(editor, selected_text, config)
 
     editor.web.evalWithCallback("window.PowerSuite.ttsGetText()", handle_text)
@@ -109,7 +115,10 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
             editor.web.eval(f"window.PowerSuite.aiInjectCloze({safe_translation});")
             
             if is_combo:
-                tooltip("Cloze generated! Fetching Audio...")
+                tts_settings = config.get("tts_settings", {})
+                active_model = tts_settings.get("model_id", "Unknown Model")
+                tooltip(f"Cloze generated! Fetching Audio ({active_model})...")
+
                 # Start TTS using the same extracted text!
                 run_tts_process(editor, ai_prompt_text, config)
             else:

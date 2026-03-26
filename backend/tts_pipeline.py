@@ -15,20 +15,24 @@ def get_ssl_context():
 def generate_audio(text: str, tts_config: dict) -> str:
     """Takes pure text, fetches audio from ElevenLabs, saves it, returns filename."""
     api_key = tts_config.get("elevenlabs_api_key")
-    voice_id = tts_config.get("voice_id", "ErXwobaYiN019PkySvjV")
-
+    voice_id = tts_config.get("voice_id", "ZF6FPAbjXT4488VcRRnw") # Defaulted to Amelia!
+    model_id = tts_config.get("model_id", "eleven_multilingual_v2") # Using the stable v2 model
+    
     if not api_key or api_key == "YOUR_ELEVENLABS_KEY":
         return "Error: No ElevenLabs API Key in config"
 
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    # Define the URL exactly ONCE, including the 128kbps MP3 parameter
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
+    
     headers = {
         "Accept": "audio/mpeg",
         "Content-Type": "application/json",
         "xi-api-key": api_key
     }
+    
     payload = {
         "text": text,
-        "model_id": "eleven_multilingual_v2",
+        "model_id": model_id,
         "voice_settings": {"stability": 0.5, "similarity_boost": 0.5}
     }
 
@@ -44,7 +48,7 @@ def generate_audio(text: str, tts_config: dict) -> str:
             
             with open(file_path, 'wb') as f:
                 f.write(response.read())
-            
+                
             return filename
 
     except urllib.error.HTTPError as e:

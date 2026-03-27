@@ -139,7 +139,42 @@ window.PowerSuite.formatCurrentLine = function () {
 
       if (!shouldUnformat) {
         if (!isBlank) {
-          line.innerHTML = `${indent}<i>${html}</i>`;
+          // --- Smart Parenthesis Formatting ---
+          let targetHtml = html;
+          let leftoverHtml = "";
+          let searchIndex = 0;
+
+          while (true) {
+            const tempHtml = html.slice(searchIndex);
+            // Non-greedy search up to the first parenthesis, including preceding spaces
+            const splitMatch = tempHtml.match(
+              /^([\s\S]*?)((?:\s|&nbsp;|\u00A0)*\([\s\S]*)$/i,
+            );
+
+            if (!splitMatch) break;
+
+            const preHtml = html.slice(0, searchIndex) + splitMatch[1];
+
+            // Safety Check: Ensure we aren't splitting inside an HTML attribute
+            const openTags = (preHtml.match(/</g) || []).length;
+            const closeTags = (preHtml.match(/>/g) || []).length;
+
+            if (openTags === closeTags) {
+              const preText = preHtml.replace(/<[^>]+>/g, "").trim();
+              // Only split if there's actual sentence content before the parenthesis
+              if (preText.length > 0) {
+                targetHtml = preHtml;
+                leftoverHtml = splitMatch[2];
+                break; // Found the perfect split point
+              }
+            }
+
+            // Advance the index and keep searching
+            const parenOffset = splitMatch[2].indexOf("(");
+            searchIndex += splitMatch[1].length + parenOffset + 1;
+          }
+
+          line.innerHTML = `${indent}<i>${targetHtml}</i>${leftoverHtml}`;
           line.dataset.ankiFmt = "1";
         } else {
           line.innerHTML = html;

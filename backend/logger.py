@@ -53,12 +53,27 @@ def handle_js_message(handled: tuple[bool, object], message: str, context: objec
     # Let Anki handle normal messages
     return handled
 
-def log_tooltip(message: str):
-    """Intercepts Python tooltips to log them before showing."""
+def log_tooltip(message: str, period: int = 3000, parent=None, **kwargs):
+    """Intercepts Python tooltips to log them before showing, and logs when they disappear."""
+    from aqt.qt import QTimer
+    
+    # 1. Log the exact moment it appears and how long it is scheduled to stay
     write_to_log({
-        "type": "tooltip",
-        "message": message
+        "type": "tooltip_show",
+        "message": message,
+        "duration_ms": period
     })
-    # We still import the real tooltip to actually show it
+    
+    # 2. Define a delayed function to log when it vanishes
+    def on_hide():
+        write_to_log({
+            "type": "tooltip_hide",
+            "message": message
+        })
+        
+    # 3. Spawn a native Qt timer to fire the hide log exactly when the tooltip fades
+    QTimer.singleShot(period, on_hide)
+    
+    # 4. Call the real Anki tooltip so it actually shows up on screen
     from aqt.utils import tooltip
-    tooltip(message)
+    tooltip(message, period=period, parent=parent, **kwargs)

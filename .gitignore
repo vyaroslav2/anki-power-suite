@@ -13,3 +13,6 @@ debug.log
 # Ignore OS files
 .DS_Store
 Thumbs.db
+
+# Ignore dev snippets
+debugger_toast.js

@@ -93,7 +93,6 @@ def trigger_tts_standalone(editor: Editor):
 
     editor.web.evalWithCallback("window.PowerSuite.ttsGetText()", handle_text)
 
-
 # --- AI TRANSLATOR & COMBO HOTKEY ---
 def trigger_ai_pipeline(editor: Editor, is_combo=False):
     inject_js(editor)
@@ -111,22 +110,31 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
 
         def on_finished(future):
             translation = future.result()
-            if translation.startswith("Error"):
-                tooltip(translation)
-                editor.web.eval("window.PowerSuite.isProcessing = false;")
-                return
+            
+            # 1. Identify if the result is an error message (catches 'Error:', 'HTTP Error', etc.)
+            is_error = translation.startswith("Error") or translation.startswith("HTTP Error") or translation.startswith("General Error")
+            
+            # 2. Sanitize braces to prevent Anki's cloze regex from breaking (prevents dangling '}' on unwrap)
+            translation = translation.replace('{', '[').replace('}', ']')
             
             cloze_translation = re.sub(r'["“”«»]', '', translation)
             cloze_translation = re.sub(r"(?<!\w)['‘’]|['‘’](?!\w)", "", cloze_translation)
             cloze_translation = re.sub(r'(^|[.!?])\s*[\-—–]+\s*', r'\1 ', cloze_translation).replace('\n', ' ').strip()
 
             safe_translation = json.dumps(cloze_translation)
-            combo_str = 'true' if is_combo else 'false'
             
-            # Check if user aborted during the AI wait time.
+            # 3. If it's an error, force JS to treat isCombo as false so it instantly unlocks the Editor UI
+            combo_for_js = 'true' if (is_combo and not is_error) else 'false'
+            
+            # 4. Check if user aborted during the AI wait time.
             def on_injected(success):
                 if not success:
-                    return # Task was aborted! Do not trigger TTS or show success tooltip.
+                    return # Task was aborted manually! Do not trigger TTS or show ghostly tooltips.
+                
+                if is_error:
+                    msg = "AI Error pasted in editor. Combo aborted." if is_combo else "AI Error pasted in editor."
+                    tooltip(msg)
+                    return # Abort here to completely block TTS from firing
                 
                 if is_combo:
                     tts_settings = config.get("tts_settings", {})
@@ -137,14 +145,13 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
                     tooltip("Cloze generated!")
 
             editor.web.evalWithCallback(
-                f"window.PowerSuite.aiInjectCloze({safe_translation}, {combo_str});", 
+                f"window.PowerSuite.aiInjectCloze({safe_translation}, {combo_for_js});", 
                 on_injected
             )
 
         mw.taskman.run_in_background(do_work, on_finished)
 
     editor.web.evalWithCallback("window.PowerSuite.aiGetText()", handle_extracted_text)
-
 
 # --- UNWRAPPER UTILITY (ALSO ACTS AS ABORT) ---
 def trigger_unwrapper(editor: Editor):

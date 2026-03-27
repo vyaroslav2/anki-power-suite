@@ -3,7 +3,7 @@ import json
 import re
 from aqt import mw, gui_hooks, sound
 from aqt.editor import Editor
-from aqt.utils import tooltip
+from .backend.logger import wipe_log_on_init, handle_js_message, log_tooltip as tooltip
 
 from .backend.llm_pipeline import translate_via_gemini
 from .backend.tts_pipeline import generate_audio
@@ -13,6 +13,7 @@ CONFIG_PATH = os.path.join(ADDON_PATH, "config.json")
 UTILS_JS_PATH = os.path.join(ADDON_PATH, "frontend", "shared_utils.js")
 ACTIONS_JS_PATH = os.path.join(ADDON_PATH, "frontend", "hotkey_actions.js")
 PASSIVE_JS_PATH = os.path.join(ADDON_PATH, "frontend", "passive_listeners.js")
+DEBUG_JS_PATH = os.path.join(ADDON_PATH, "frontend", "debugger_flight_recorder.js")
 
 def load_config():
     try:
@@ -26,14 +27,18 @@ def inject_js(editor: Editor, include_passive=False):
     try:
         with open(UTILS_JS_PATH, "r", encoding="utf-8") as f: utils_js = f.read()
         with open(ACTIONS_JS_PATH, "r", encoding="utf-8") as f: actions_js = f.read()
+        
+        # Load the flight recorder
+        with open(DEBUG_JS_PATH, "r", encoding="utf-8") as f: debug_js = f.read()
+        
         passive_js = ""
         if include_passive and config.get("enable_smart_trim", False):
             with open(PASSIVE_JS_PATH, "r", encoding="utf-8") as f: passive_js = f.read()
             
-        editor.web.eval(f"{utils_js}\n{passive_js}\n{actions_js}")
+        # Add debug_js to the eval string
+        editor.web.eval(f"{utils_js}\n{passive_js}\n{actions_js}\n{debug_js}")
     except Exception as e:
         print(f"Error loading JS: {e}")
-
 def on_editor_init(editor: Editor):
     inject_js(editor, include_passive=True)
 
@@ -185,3 +190,5 @@ def on_setup_shortcuts(shortcuts: list[tuple], editor: Editor):
 
 gui_hooks.editor_did_init.append(on_editor_init)
 gui_hooks.editor_did_init_shortcuts.append(on_setup_shortcuts)
+gui_hooks.editor_did_init.append(wipe_log_on_init)
+gui_hooks.webview_did_receive_js_message.append(handle_js_message)

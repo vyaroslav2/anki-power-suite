@@ -11,7 +11,7 @@ window.PowerSuite.formatCurrentLine = function () {
   if (!editableRoot) return;
 
   window.PowerSuite.isProcessing = true;
-  let sel; // Declare selection outside so the finally block can use it
+  let sel;
 
   try {
     const indent = "\u00A0\u00A0\u00A0\u00A0";
@@ -108,9 +108,7 @@ window.PowerSuite.formatCurrentLine = function () {
 
     const scope = allLines.slice(low, high + 1);
 
-    // FIX 2: Use textContent instead of innerHTML so HTML markers don't split the {{c
     if (scope.some((line) => line.textContent.includes("{{c"))) {
-      // Throw a specific error so we skip formatting, but still hit the finally block
       throw new Error("CLOZE_ABORT");
     }
 
@@ -163,7 +161,6 @@ window.PowerSuite.formatCurrentLine = function () {
       window.PowerSuite.log("FORMATTER ERROR: " + e, "error");
     }
   } finally {
-    // FIX 1: Restore the cursor BEFORE deleting the markers, no matter what happened
     const finalStart = editableRoot.querySelector(".anki-fmt-start");
     const finalEnd = editableRoot.querySelector(".anki-fmt-end");
     if (finalStart && finalEnd && sel) {
@@ -173,19 +170,17 @@ window.PowerSuite.formatCurrentLine = function () {
         finalRange.setEndBefore(finalEnd);
         sel.removeAllRanges();
         sel.addRange(finalRange);
-      } catch (err) {
-        // Silently ignore if range can't be restored
-      }
+      } catch (err) {}
     }
 
-    // Now safely remove the markers
     editableRoot
       .querySelectorAll(".anki-fmt-start, .anki-fmt-end")
       .forEach((m) => m.remove());
     editableRoot.focus();
-    window.PowerSuite.isProcessing = false; // ALWAYS UNLOCK
+    window.PowerSuite.isProcessing = false;
   }
 };
+
 // ==========================================
 // 2. AI TRANSLATOR (F8 / Ctrl+F10)
 // ==========================================
@@ -198,74 +193,91 @@ window.PowerSuite.aiGetText = function () {
   const activeEl = window.PowerSuite.getEditableRoot();
   if (!activeEl) return "";
 
-  window.PowerSuite.isProcessing = true; // LOCK
-  window.PowerSuite.aiActiveElement = activeEl;
-
   const rootNode = activeEl.getRootNode();
   const sel = rootNode.getSelection
     ? rootNode.getSelection()
     : window.getSelection();
 
-  if (!sel || !sel.rangeCount) {
-    window.PowerSuite.isProcessing = false;
-    return "";
-  }
+  if (!sel || !sel.rangeCount) return "";
 
   let extractedText = sel.toString();
   let isAutoExpanded = false;
+  let anchor = sel.anchorNode;
 
-  // AUTO-EXPAND IF CURSOR IS JUST PLACED ON A LINE
+  if (!anchor) return "";
+
+  let blockElement = anchor.nodeType === 3 ? anchor.parentNode : anchor;
+  while (
+    blockElement &&
+    blockElement !== activeEl &&
+    !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
+      blockElement.nodeName.toUpperCase(),
+    )
+  ) {
+    blockElement = blockElement.parentNode;
+  }
+  if (!blockElement) blockElement = activeEl;
+
+  // AUTO-EXPAND
   if (extractedText.trim().length === 0) {
     isAutoExpanded = true;
-    let anchor = sel.anchorNode;
-    if (!anchor) {
-      window.PowerSuite.isProcessing = false;
-      return "";
-    }
-
-    let blockElement = anchor.nodeType === 3 ? anchor.parentNode : anchor;
-    while (
-      blockElement &&
-      blockElement !== activeEl &&
-      !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
-        blockElement.nodeName.toUpperCase(),
-      )
-    ) {
-      blockElement = blockElement.parentNode;
-    }
-    if (!blockElement) blockElement = activeEl;
-
     const range = document.createRange();
     range.selectNodeContents(blockElement);
     sel.removeAllRanges();
     sel.addRange(range);
-
     extractedText = sel.toString();
   }
 
-  if (extractedText.trim().length === 0) {
-    window.PowerSuite.isProcessing = false;
+  if (extractedText.trim().length === 0) return "";
+
+  // EDGE CASE PROTECTIONS (Blocks nested cloze bugs)
+  let preText = "";
+  try {
+    const preRange = document.createRange();
+    preRange.setStart(blockElement, 0);
+    preRange.setEnd(
+      sel.getRangeAt(0).startContainer,
+      sel.getRangeAt(0).startOffset,
+    );
+    preText = preRange.toString();
+  } catch (e) {}
+
+  const openCount = (preText.match(/\{\{c\d+::/g) || []).length;
+  const closeCount = (preText.match(/\}\}/g) || []).length;
+
+  if (openCount > closeCount) {
+    window.PowerSuite.log(
+      "Selection inside an existing cloze. Ignoring.",
+      "warn",
+    );
+    return "";
+  }
+  if (extractedText.includes("{{c") || extractedText.includes("}}")) {
+    window.PowerSuite.log(
+      "Selection contains cloze formatting. Ignoring.",
+      "warn",
+    );
+    return "";
+  }
+  if (isAutoExpanded && blockElement.textContent.includes("{{c")) {
+    window.PowerSuite.log("Line already contains a cloze. Ignoring.", "warn");
     return "";
   }
 
-  // --- NEW LOGIC: SMART PARENTHESES SPLITTING ---
+  window.PowerSuite.isProcessing = true; // LOCK
+  window.PowerSuite.aiActiveElement = activeEl;
+
   let targetForCloze = extractedText;
   let leftover = "";
 
-  // Only apply smart-split if the user didn't manually select the text
   if (isAutoExpanded) {
-    // Regex matches: 1. Core text, 2. Spaces before parenthesis, 3. The '(' and everything after
     const splitMatch = extractedText.match(/^([\s\S]*?)(\s*)(\([\s\S]*)$/);
-
-    // Make sure we aren't completely eliminating the text (e.g., if line ONLY had "(hint)")
     if (splitMatch && splitMatch[1].trim().length > 0) {
       targetForCloze = splitMatch[1];
-      leftover = splitMatch[2] + splitMatch[3]; // Preserves original spacing + parenthesis block
+      leftover = splitMatch[2] + splitMatch[3];
     }
   }
-  // ----------------------------------------------
 
-  // Handle prefix/suffix spaces correctly around the target text
   const leadingMatch = targetForCloze.match(/^[\s\u00A0]+/);
   const prefix = leadingMatch ? leadingMatch[0] : "";
   const trailingMatch = targetForCloze.match(/[\s\u00A0]+$/);
@@ -273,28 +285,33 @@ window.PowerSuite.aiGetText = function () {
   const cleanText = targetForCloze.trim();
 
   window.PowerSuite.aiToken = "[[AI_TRANSLATING_" + Date.now() + "]]";
-
-  // Notice we now append 'leftover' completely OUTSIDE the cloze tag
   const skeleton = `${prefix}{{c1::${cleanText}::${window.PowerSuite.aiToken}}}${suffix}${leftover}`;
 
-  document.execCommand("removeFormat", false, null);
+  // ExecCommand + Notify Anki UI of change (Saves Main Field Undo History)
   document.execCommand("insertText", false, skeleton);
+  activeEl.dispatchEvent(
+    new InputEvent("input", { bubbles: true, composed: true }),
+  );
 
   window.PowerSuite.log("AI Placeholder injected.", "info");
-
-  // We return cleanText so Python sends ONLY the sentence to Gemini/ElevenLabs!
   return cleanText;
 };
 
-window.PowerSuite.aiInjectCloze = function (translated) {
-  const activeEl = window.PowerSuite.aiActiveElement;
-  const token = window.PowerSuite.aiToken;
-
-  if (!activeEl || !token) {
-    window.PowerSuite.log("Missing active element or token.", "error");
-    window.PowerSuite.isProcessing = false;
+window.PowerSuite.aiInjectCloze = function (translated, isCombo) {
+  // If the user aborted during generation, Traffic Cop will block silent pastes
+  if (!window.PowerSuite.isProcessing || !window.PowerSuite.aiToken) {
+    window.PowerSuite.log("Task was aborted. Ignoring AI response.", "warn");
     return false;
   }
+
+  const activeEl = window.PowerSuite.aiActiveElement;
+  const token = window.PowerSuite.aiToken;
+  if (!activeEl) return false;
+
+  const rootNode = activeEl.getRootNode();
+  const sel = rootNode.getSelection
+    ? rootNode.getSelection()
+    : window.getSelection();
 
   const root = activeEl.shadowRoot || activeEl;
   const walker = document.createTreeWalker(
@@ -304,107 +321,131 @@ window.PowerSuite.aiInjectCloze = function (translated) {
     false,
   );
 
-  let found = false;
+  let targetNode = null;
   let node;
   while ((node = walker.nextNode())) {
     if (node.nodeValue.includes(token)) {
-      node.nodeValue = node.nodeValue.replace(token, translated);
-      found = true;
+      targetNode = node;
       break;
     }
   }
 
-  if (!found) {
-    window.PowerSuite.log("TreeWalker missed token, using fallback.", "warn");
-    root.innerHTML = root.innerHTML.replace(token, translated);
+  if (targetNode) {
+    const range = document.createRange();
+    const startIdx = targetNode.nodeValue.indexOf(token);
+    range.setStart(targetNode, startIdx);
+    range.setEnd(targetNode, startIdx + token.length);
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    // Inject and notify Anki
+    document.execCommand("insertText", false, translated);
+    activeEl.dispatchEvent(
+      new InputEvent("input", { bubbles: true, composed: true }),
+    );
+
+    window.PowerSuite.log("Translation injected.", "success");
+  } else {
+    window.PowerSuite.log("Token not found.", "error");
+    return false;
   }
 
-  activeEl.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-
-  window.PowerSuite.log("Translation injected successfully.", "success");
-
-  // CLEANUP & UNLOCK
   window.PowerSuite.aiActiveElement = null;
   window.PowerSuite.aiToken = null;
-  window.PowerSuite.isProcessing = false;
 
+  if (!isCombo) {
+    window.PowerSuite.isProcessing = false;
+  }
   return true;
 };
+
 // ==========================================
 // 3. TTS PIPELINE (F9 / Combo)
 // ==========================================
 window.PowerSuite.ttsGetText = function () {
-  if (window.PowerSuite.isProcessing) {
-    window.PowerSuite.log("System is busy. Ignoring TTS request.", "warn");
-    return "";
-  }
+  if (window.PowerSuite.isProcessing) return "";
 
   const activeEl = window.PowerSuite.getEditableRoot();
   if (!activeEl) return "";
 
-  window.PowerSuite.isProcessing = true; // LOCK
   const rootNode = activeEl.getRootNode();
   const sel = rootNode.getSelection
     ? rootNode.getSelection()
     : window.getSelection();
-
-  if (!sel || !sel.rangeCount) {
-    window.PowerSuite.isProcessing = false;
-    return "";
-  }
+  if (!sel || !sel.rangeCount) return "";
 
   let extractedText = sel.toString();
-  if (!extractedText.trim()) {
-    let anchor = sel.anchorNode;
-    if (anchor) {
-      let blockElement = anchor.nodeType === 3 ? anchor.parentNode : anchor;
-      while (
-        blockElement &&
-        blockElement !== activeEl &&
-        !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
-          blockElement.nodeName.toUpperCase(),
-        )
-      ) {
-        blockElement = blockElement.parentNode;
-      }
-      if (!blockElement) blockElement = activeEl;
-      extractedText = blockElement.innerText || blockElement.textContent || "";
-    }
+  let isAutoExpanded = false;
+  let anchor = sel.anchorNode;
+
+  if (!anchor) return "";
+
+  let blockElement = anchor.nodeType === 3 ? anchor.parentNode : anchor;
+  while (
+    blockElement &&
+    blockElement !== activeEl &&
+    !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
+      blockElement.nodeName.toUpperCase(),
+    )
+  ) {
+    blockElement = blockElement.parentNode;
   }
+  if (!blockElement) blockElement = activeEl;
 
   if (!extractedText.trim()) {
-    window.PowerSuite.isProcessing = false;
+    isAutoExpanded = true;
+    extractedText = blockElement.innerText || blockElement.textContent || "";
+  }
+  if (!extractedText.trim()) return "";
+
+  // EDGE CASE PROTECTIONS
+  let preText = "";
+  try {
+    const preRange = document.createRange();
+    preRange.setStart(blockElement, 0);
+    preRange.setEnd(
+      sel.getRangeAt(0).startContainer,
+      sel.getRangeAt(0).startOffset,
+    );
+    preText = preRange.toString();
+  } catch (e) {}
+
+  const openCount = (preText.match(/\{\{c\d+::/g) || []).length;
+  const closeCount = (preText.match(/\}\}/g) || []).length;
+
+  if (
+    openCount > closeCount ||
+    extractedText.includes("{{c") ||
+    extractedText.includes("}}") ||
+    (isAutoExpanded && blockElement.textContent.includes("{{c"))
+  ) {
     return "";
   }
 
-  // Strip parentheses and their contents
   let filteredText = extractedText.replace(/\([^)]*\)/g, " ");
   filteredText = filteredText.replace(/\s{2,}/g, " ").trim();
 
-  if (!filteredText) {
-    window.PowerSuite.isProcessing = false;
-    return "";
-  }
+  if (!filteredText) return "";
 
+  window.PowerSuite.isProcessing = true; // LOCK
   window.PowerSuite.log("TTS Text extracted successfully.", "info");
   return filteredText;
 };
 
 window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
+  if (!window.PowerSuite.isProcessing) {
+    window.PowerSuite.log("Task aborted. Ignoring Audio response.", "warn");
+    return false;
+  }
+
   function getAllEditableFields(root) {
     const results = [];
-    const directHits = root.querySelectorAll(
-      '[contenteditable="true"], .field',
-    );
-    directHits.forEach((el) => {
+    root.querySelectorAll('[contenteditable="true"], .field').forEach((el) => {
       if (!results.includes(el)) results.push(el);
     });
-
-    const allElements = root.querySelectorAll("*");
-    allElements.forEach((el) => {
+    root.querySelectorAll("*").forEach((el) => {
       if (el.shadowRoot) {
-        const shadowHits = getAllEditableFields(el.shadowRoot);
-        shadowHits.forEach((hit) => {
+        getAllEditableFields(el.shadowRoot).forEach((hit) => {
           if (!results.includes(hit)) results.push(hit);
         });
       }
@@ -419,17 +460,21 @@ window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
   );
 
   if (editables.length === 0 || targetIndex >= editables.length) {
-    window.PowerSuite.log(`Target field [${targetIndex}] not found.`, "error");
-    window.PowerSuite.isProcessing = false; // Unlock
-    return;
+    window.PowerSuite.isProcessing = false;
+    return false;
   }
 
   const targetField = editables[targetIndex];
+
+  // ==========================================
+  // FIXED: RESTORED INNERHTML BACKGROUND INJECTION
+  // This prevents cursor jumping and selection loss completely.
+  // ==========================================
   let currentHtml = targetField.innerHTML || "";
   currentHtml = currentHtml.replace(/(<br\s*\/?>|\s)+$/gi, "");
+  targetField.innerHTML = currentHtml + ` [sound:${filename}]`;
 
-  targetField.innerHTML = currentHtml + `[sound:${filename}]`;
-
+  // Notify Anki UI of the shadow DOM state change
   targetField.dispatchEvent(
     new InputEvent("input", { bubbles: true, composed: true }),
   );
@@ -437,93 +482,152 @@ window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
     new Event("change", { bubbles: true, composed: true }),
   );
 
-  window.PowerSuite.log(
-    `Injected [sound:${filename}] into field index ${targetIndex}.`,
-    "success",
-  );
+  window.PowerSuite.log("Audio injected silently in background.", "success");
   window.PowerSuite.isProcessing = false; // UNLOCK!
+  return true;
 };
+
 // ==========================================
-// 4. CLOZE UNWRAPPER (Alt+Shift+U)
+// 4. CLOZE UNWRAPPER / ABORT TRIGGER
 // ==========================================
 window.PowerSuite.unwrapCloze = function () {
-  if (window.PowerSuite.isProcessing) return;
+  let wasAborting = false;
+  let tokenToKill = window.PowerSuite.aiToken;
+
+  // 1. Act as an Instant Abort Button if the script is running
+  if (window.PowerSuite.isProcessing) {
+    wasAborting = true;
+    window.PowerSuite.isProcessing = false;
+    window.PowerSuite.aiToken = null;
+  }
 
   const activeEl = window.PowerSuite.getEditableRoot();
-  if (!activeEl) return;
+  if (!activeEl) return wasAborting ? "ABORTED" : "IGNORED";
 
   const rootNode = activeEl.getRootNode();
   const sel = rootNode.getSelection
     ? rootNode.getSelection()
     : window.getSelection();
-  if (!sel || !sel.rangeCount) return;
+  if (!sel) return wasAborting ? "ABORTED" : "IGNORED";
 
-  // 1. Find the current block
-  let anchor = sel.anchorNode;
-  if (!anchor) return;
+  let actionResult = "IGNORED";
 
-  let blockElement = anchor.nodeType === 3 ? anchor.parentNode : anchor;
-  while (
-    blockElement &&
-    blockElement !== activeEl &&
-    !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
-      blockElement.nodeName.toUpperCase(),
-    )
-  ) {
-    blockElement = blockElement.parentNode;
-  }
-  if (!blockElement) blockElement = activeEl;
+  const unwrapBlock = (block) => {
+    const html = block.innerHTML;
+    const unwrapRegex = /\{\{c\d+::(.*?)(?:::.*?)?\}\}/g;
+    if (unwrapRegex.test(html)) {
+      const range = document.createRange();
+      range.selectNodeContents(block);
+      sel.removeAllRanges();
+      sel.addRange(range);
 
-  const originalHtml = blockElement.innerHTML;
-
-  // Regex matches: {{c(numbers)::(Target Text)::(Hint Text)}} and captures ONLY (Target Text)
-  // It also safely handles cases where there is no hint text.
-  const unwrapRegex = /\{\{c\d+::(.*?)(?:::.*?)?\}\}/g;
-
-  if (!unwrapRegex.test(originalHtml)) {
-    window.PowerSuite.log("No cloze deletions found on this line.", "warn");
-    return;
-  }
-
-  // Strip the cloze formatting
-  blockElement.innerHTML = originalHtml.replace(unwrapRegex, "$1");
-  blockElement.dispatchEvent(
-    new InputEvent("input", { bubbles: true, composed: true }),
-  );
-
-  // 2. Cleanup Audio Tag (Looks for the last [sound:eleven_...] tag in the whole editor and removes it)
-  function getAllEditableFields(root) {
-    const results = [];
-    root
-      .querySelectorAll('[contenteditable="true"], .field')
-      .forEach((el) => results.push(el));
-    root.querySelectorAll("*").forEach((el) => {
-      if (el.shadowRoot)
-        getAllEditableFields(el.shadowRoot).forEach((hit) => results.push(hit));
-    });
-    return results;
-  }
-
-  const editables = getAllEditableFields(document).filter(
-    (el) =>
-      el.getAttribute("contenteditable") === "true" ||
-      el.classList.contains("editable"),
-  );
-
-  // We check all fields from bottom to top (usually audio is in field 2 or 3)
-  for (let i = editables.length - 1; i >= 0; i--) {
-    let fieldHtml = editables[i].innerHTML;
-    // Matches the most recently added ElevenLabs sound tag
-    const audioRegex = /\[sound:eleven_[a-f0-9]+\.mp3\](?=[^\[]*$)/;
-    if (audioRegex.test(fieldHtml)) {
-      editables[i].innerHTML = fieldHtml.replace(audioRegex, "");
-      editables[i].dispatchEvent(
+      document.execCommand(
+        "insertHTML",
+        false,
+        html.replace(unwrapRegex, "$1"),
+      );
+      block.dispatchEvent(
         new InputEvent("input", { bubbles: true, composed: true }),
       );
-      window.PowerSuite.log("Removed orphaned audio tag.", "info");
-      break; // Only remove one tag per unwrap!
+      return true;
+    }
+    return false;
+  };
+
+  // 2. Unwrapping Text Focus
+  let anchor = sel.anchorNode;
+  if (anchor) {
+    let blockElement = anchor.nodeType === 3 ? anchor.parentNode : anchor;
+    while (
+      blockElement &&
+      blockElement !== activeEl &&
+      !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
+        blockElement.nodeName.toUpperCase(),
+      )
+    ) {
+      blockElement = blockElement.parentNode;
+    }
+    if (!blockElement) blockElement = activeEl;
+
+    if (unwrapBlock(blockElement)) {
+      actionResult = "UNWRAPPED";
     }
   }
 
-  window.PowerSuite.log("Cloze unwrapped successfully.", "success");
+  // Global Seek-and-Destroy (In case user clicked away before hitting Abort)
+  if (wasAborting && tokenToKill && actionResult === "IGNORED") {
+    const walker = document.createTreeWalker(
+      activeEl.shadowRoot || activeEl,
+      NodeFilter.SHOW_TEXT,
+      null,
+      false,
+    );
+    let n;
+    while ((n = walker.nextNode())) {
+      if (n.nodeValue.includes(tokenToKill)) {
+        let p = n.parentNode;
+        while (
+          p &&
+          p !== activeEl &&
+          !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
+            p.nodeName.toUpperCase(),
+          )
+        ) {
+          p = p.parentNode;
+        }
+        if (p && unwrapBlock(p)) actionResult = "UNWRAPPED";
+        break;
+      }
+    }
+  }
+
+  // 3. Audio Cleanup (Combo Mapping Sync)
+  if (!wasAborting && actionResult === "UNWRAPPED") {
+    function getAllEditableFields(root) {
+      const results = [];
+      root
+        .querySelectorAll('[contenteditable="true"], .field')
+        .forEach((el) => results.push(el));
+      root.querySelectorAll("*").forEach((el) => {
+        if (el.shadowRoot)
+          getAllEditableFields(el.shadowRoot).forEach((hit) =>
+            results.push(hit),
+          );
+      });
+      return results;
+    }
+
+    const editables = getAllEditableFields(document).filter(
+      (el) =>
+        el.getAttribute("contenteditable") === "true" ||
+        el.classList.contains("editable"),
+    );
+
+    for (let i = editables.length - 1; i >= 0; i--) {
+      let fieldHtml = editables[i].innerHTML;
+      const audioRegex = /\[sound:eleven_[a-f0-9]+\.mp3\](?=[^\[]*$)/;
+
+      if (audioRegex.test(fieldHtml)) {
+        // ==========================================
+        // FIXED: RESTORED INNERHTML BACKGROUND REMOVAL
+        // Prevents unwrapping from breaking cursor.
+        // ==========================================
+        editables[i].innerHTML = fieldHtml.replace(audioRegex, "");
+        editables[i].dispatchEvent(
+          new InputEvent("input", { bubbles: true, composed: true }),
+        );
+
+        window.PowerSuite.log("Removed orphaned audio tag silently.", "info");
+        actionResult = "UNWRAPPED_WITH_AUDIO";
+        break; // Only remove one tag per unwrap
+      }
+    }
+  }
+
+  if (wasAborting) return "ABORTED";
+
+  if (actionResult.startsWith("UNWRAPPED")) {
+    window.PowerSuite.log("Cloze unwrapped successfully.", "success");
+  }
+  return actionResult;
 };

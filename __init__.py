@@ -41,6 +41,7 @@ def trigger_formatter(editor: Editor):
     inject_js(editor)
     editor.web.eval("window.PowerSuite.formatCurrentLine();")
 
+
 # --- CORE TTS WORKER (Used by both Standalone and Combo) ---
 def run_tts_process(editor: Editor, text: str, config: dict):
     tts_settings = config.get("tts_settings", {})
@@ -53,15 +54,26 @@ def run_tts_process(editor: Editor, text: str, config: dict):
         if filename.startswith("Error"):
             tooltip(filename)
             editor.web.eval("window.PowerSuite.isProcessing = false;")
-        else:
-            # 1. Play the audio
-            file_path = os.path.join(mw.col.media.dir(), filename)
-            sound.av_player.play_file(file_path)
+            return
             
-            # 2. Inject the audio tag into Anki
-            safe_filename = json.dumps(filename)
-            target_idx = tts_settings.get("target_field_index", 2)
-            editor.web.eval(f"window.PowerSuite.ttsInjectAudio({safe_filename}, {target_idx});")
+        safe_filename = json.dumps(filename)
+        target_idx = tts_settings.get("target_field_index", 2)
+        
+        # Check if JS accepts the audio. If it aborted, we delete the MP3 silently.
+        def on_injected(success):
+            if success:
+                file_path = os.path.join(mw.col.media.dir(), filename)
+                sound.av_player.play_file(file_path)
+            else:
+                try:
+                    os.remove(os.path.join(mw.col.media.dir(), filename))
+                except Exception:
+                    pass
+                    
+        editor.web.evalWithCallback(
+            f"window.PowerSuite.ttsInjectAudio({safe_filename}, {target_idx});", 
+            on_injected
+        )
             
     mw.taskman.run_in_background(do_tts, on_tts_finished)
 
@@ -71,14 +83,11 @@ def trigger_tts_standalone(editor: Editor):
     inject_js(editor)
     config = load_config()
     
-    # Grab the model name just for the tooltip!
     tts_settings = config.get("tts_settings", {})
     active_model = tts_settings.get("model_id", "Unknown Model")
     
     def handle_text(selected_text):
         if not selected_text: return
-        
-        # Now the Anki tooltip will literally say: "Fetching Audio (eleven_v3)..."
         tooltip(f"Fetching Audio ({active_model})...")
         run_tts_process(editor, selected_text, config)
 
@@ -112,26 +121,41 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
             cloze_translation = re.sub(r'(^|[.!?])\s*[\-—–]+\s*', r'\1 ', cloze_translation).replace('\n', ' ').strip()
 
             safe_translation = json.dumps(cloze_translation)
-            editor.web.eval(f"window.PowerSuite.aiInjectCloze({safe_translation});")
+            combo_str = 'true' if is_combo else 'false'
             
-            if is_combo:
-                tts_settings = config.get("tts_settings", {})
-                active_model = tts_settings.get("model_id", "Unknown Model")
-                tooltip(f"Cloze generated! Fetching Audio ({active_model})...")
+            # Check if user aborted during the AI wait time.
+            def on_injected(success):
+                if not success:
+                    return # Task was aborted! Do not trigger TTS or show success tooltip.
+                
+                if is_combo:
+                    tts_settings = config.get("tts_settings", {})
+                    active_model = tts_settings.get("model_id", "Unknown Model")
+                    tooltip(f"Cloze generated! Fetching Audio ({active_model})...")
+                    run_tts_process(editor, ai_prompt_text, config)
+                else:
+                    tooltip("Cloze generated!")
 
-                # Start TTS using the same extracted text!
-                run_tts_process(editor, ai_prompt_text, config)
-            else:
-                tooltip("Cloze generated!")
+            editor.web.evalWithCallback(
+                f"window.PowerSuite.aiInjectCloze({safe_translation}, {combo_str});", 
+                on_injected
+            )
 
         mw.taskman.run_in_background(do_work, on_finished)
 
     editor.web.evalWithCallback("window.PowerSuite.aiGetText()", handle_extracted_text)
 
-# --- UNWRAPPER UTILITY ---
+
+# --- UNWRAPPER UTILITY (ALSO ACTS AS ABORT) ---
 def trigger_unwrapper(editor: Editor):
     inject_js(editor)
-    editor.web.eval("window.PowerSuite.unwrapCloze();")
+    def on_unwrapped(result):
+        if result == "ABORTED":
+            tooltip("Generation Aborted.")
+        elif result.startswith("UNWRAPPED"):
+            tooltip("Cloze unwrapped.")
+            
+    editor.web.evalWithCallback("window.PowerSuite.unwrapCloze();", on_unwrapped)
 
 
 def on_setup_shortcuts(shortcuts: list[tuple], editor: Editor):
@@ -151,5 +175,6 @@ def on_setup_shortcuts(shortcuts: list[tuple], editor: Editor):
     if "unwrap_cloze" in hotkeys:
         shortcuts.append((hotkeys["unwrap_cloze"], lambda: trigger_unwrapper(editor)))
         
+
 gui_hooks.editor_did_init.append(on_editor_init)
 gui_hooks.editor_did_init_shortcuts.append(on_setup_shortcuts)

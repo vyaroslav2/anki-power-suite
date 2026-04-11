@@ -265,7 +265,7 @@ window.PowerSuite.aiGetText = function () {
 
   if (extractedText.trim().length === 0) return "";
 
-  // EDGE CASE PROTECTIONS (Blocks nested cloze bugs)
+  // EDGE CASE PROTECTIONS
   let preText = "";
   try {
     const preRange = document.createRange();
@@ -299,37 +299,118 @@ window.PowerSuite.aiGetText = function () {
     return "";
   }
 
-  window.PowerSuite.isProcessing = true; // LOCK
+  window.PowerSuite.isProcessing = true;
   window.PowerSuite.aiActiveElement = activeEl;
 
-  let targetForCloze = extractedText;
-  let leftover = "";
+  // Extract raw HTML to protect spans like <span class="del">
+  const range = sel.getRangeAt(0);
+  const frag = range.cloneContents();
+  const div = document.createElement("div");
+  div.appendChild(frag);
+  const selectedHTML = div.innerHTML;
 
+  let targetHTML = selectedHTML;
+  let leftoverHTML = "";
+
+  // Split HTML at the first parenthesis not enclosed in HTML tags
   if (isAutoExpanded) {
-    const splitMatch = extractedText.match(/^([\s\S]*?)(\s*)(\([\s\S]*)$/);
-    if (splitMatch && splitMatch[1].trim().length > 0) {
-      targetForCloze = splitMatch[1];
-      leftover = splitMatch[2] + splitMatch[3];
+    let inTag = false;
+    let splitIndex = -1;
+    for (let i = 0; i < selectedHTML.length; i++) {
+      if (selectedHTML[i] === "<") inTag = true;
+      else if (selectedHTML[i] === ">") inTag = false;
+      else if (!inTag && selectedHTML[i] === "(") {
+        splitIndex = i;
+        break;
+      }
+    }
+
+    if (splitIndex !== -1) {
+      targetHTML = selectedHTML.slice(0, splitIndex);
+      leftoverHTML = selectedHTML.slice(splitIndex);
     }
   }
 
-  const leadingMatch = targetForCloze.match(/^[\s\u00A0]+/);
-  const prefix = leadingMatch ? leadingMatch[0] : "";
-  const trailingMatch = targetForCloze.match(/[\s\u00A0]+$/);
-  const suffix = trailingMatch ? trailingMatch[0] : "";
-  const cleanText = targetForCloze.trim();
+  // --- NEW LOGIC: DOM-Walker to safely pull whitespace out from inside formatting tags ---
+  const divForTrim = document.createElement("div");
+  divForTrim.innerHTML = targetHTML;
+
+  function extractLeadingWhitespace(el) {
+    let ws = "";
+    while (el.firstChild) {
+      let node = el.firstChild;
+      if (node.nodeType === 3) {
+        // Text Node
+        let match = node.nodeValue.match(/^([\s\u00A0]+)/);
+        if (match) {
+          ws += match[1].replace(/\u00A0/g, "&nbsp;");
+          node.nodeValue = node.nodeValue.slice(match[1].length);
+          if (node.nodeValue.length === 0) el.removeChild(node);
+          else break;
+        } else break;
+      } else if (node.nodeName === "BR") {
+        ws += "<br>";
+        el.removeChild(node);
+      } else if (node.nodeType === 1) {
+        // Element Node (e.g., <i>)
+        let childWs = extractLeadingWhitespace(node);
+        ws += childWs;
+        if (node.childNodes.length === 0) el.removeChild(node);
+        else break;
+      } else break;
+    }
+    return ws;
+  }
+
+  function extractTrailingWhitespace(el) {
+    let ws = "";
+    while (el.lastChild) {
+      let node = el.lastChild;
+      if (node.nodeType === 3) {
+        let match = node.nodeValue.match(/([\s\u00A0]+)$/);
+        if (match) {
+          ws = match[1].replace(/\u00A0/g, "&nbsp;") + ws;
+          node.nodeValue = node.nodeValue.slice(0, -match[1].length);
+          if (node.nodeValue.length === 0) el.removeChild(node);
+          else break;
+        } else break;
+      } else if (node.nodeName === "BR") {
+        ws = "<br>" + ws;
+        el.removeChild(node);
+      } else if (node.nodeType === 1) {
+        let childWs = extractTrailingWhitespace(node);
+        ws = childWs + ws;
+        if (node.childNodes.length === 0) el.removeChild(node);
+        else break;
+      } else break;
+    }
+    return ws;
+  }
+
+  const prefix = extractLeadingWhitespace(divForTrim);
+  const suffix = extractTrailingWhitespace(divForTrim);
+  const innerHTML = divForTrim.innerHTML;
+
+  // Clean text strictly for Gemini's prompt (strips all HTML)
+  const divForText = document.createElement("div");
+  divForText.innerHTML = innerHTML;
+  const cleanTextForAI = divForText.textContent || divForText.innerText || "";
 
   window.PowerSuite.aiToken = "[[AI_TRANSLATING_" + Date.now() + "]]";
-  const skeleton = `${prefix}{{c1::${cleanText}::${window.PowerSuite.aiToken}}}${suffix}${leftover}`;
 
-  // ExecCommand + Notify Anki UI of change (Saves Main Field Undo History)
-  document.execCommand("insertText", false, skeleton);
+  // Build the skeleton, sandwiching the clean HTML between the extracted spacing
+  const skeletonHTML = `${prefix}{{c1::${innerHTML}::${window.PowerSuite.aiToken}}}${suffix}${leftoverHTML}`;
+
+  sel.removeAllRanges();
+  sel.addRange(range);
+  document.execCommand("insertHTML", false, skeletonHTML);
+
   activeEl.dispatchEvent(
     new InputEvent("input", { bubbles: true, composed: true }),
   );
 
   window.PowerSuite.log("AI Placeholder injected.", "info");
-  return cleanText;
+  return cleanTextForAI.trim();
 };
 
 window.PowerSuite.aiInjectCloze = function (translated, isCombo) {
@@ -376,7 +457,6 @@ window.PowerSuite.aiInjectCloze = function (translated, isCombo) {
       lineBlock = lineBlock.parentNode;
     }
 
-    // 1. STRICT COMBO TRACKER: Only tag the line if Combo triggered this
     if (isCombo) {
       window.PowerSuite.comboActiveLine = lineBlock || activeEl;
     }
@@ -388,6 +468,8 @@ window.PowerSuite.aiInjectCloze = function (translated, isCombo) {
     sel.removeAllRanges();
     sel.addRange(range);
 
+    // insertText is perfectly safe here! It strictly targets the characters of the token inside
+    // a pure Text Node, so it is impossible for it to affect leftoverHTML or .del spans.
     document.execCommand("insertText", false, translated);
     activeEl.dispatchEvent(
       new InputEvent("input", { bubbles: true, composed: true }),

@@ -333,7 +333,6 @@ window.PowerSuite.aiGetText = function () {
 };
 
 window.PowerSuite.aiInjectCloze = function (translated, isCombo) {
-  // If the user aborted during generation, Traffic Cop will block silent pastes
   if (!window.PowerSuite.isProcessing || !window.PowerSuite.aiToken) {
     window.PowerSuite.log("Task was aborted. Ignoring AI response.", "warn");
     return false;
@@ -347,7 +346,6 @@ window.PowerSuite.aiInjectCloze = function (translated, isCombo) {
   const sel = rootNode.getSelection
     ? rootNode.getSelection()
     : window.getSelection();
-
   const root = activeEl.shadowRoot || activeEl;
   const walker = document.createTreeWalker(
     root,
@@ -366,6 +364,23 @@ window.PowerSuite.aiInjectCloze = function (translated, isCombo) {
   }
 
   if (targetNode) {
+    let lineBlock =
+      targetNode.nodeType === 3 ? targetNode.parentNode : targetNode;
+    while (
+      lineBlock &&
+      lineBlock !== activeEl &&
+      !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
+        lineBlock.nodeName.toUpperCase(),
+      )
+    ) {
+      lineBlock = lineBlock.parentNode;
+    }
+
+    // 1. STRICT COMBO TRACKER: Only tag the line if Combo triggered this
+    if (isCombo) {
+      window.PowerSuite.comboActiveLine = lineBlock || activeEl;
+    }
+
     const range = document.createRange();
     const startIdx = targetNode.nodeValue.indexOf(token);
     range.setStart(targetNode, startIdx);
@@ -373,12 +388,10 @@ window.PowerSuite.aiInjectCloze = function (translated, isCombo) {
     sel.removeAllRanges();
     sel.addRange(range);
 
-    // Inject and notify Anki
     document.execCommand("insertText", false, translated);
     activeEl.dispatchEvent(
       new InputEvent("input", { bubbles: true, composed: true }),
     );
-
     window.PowerSuite.log("Translation injected.", "success");
   } else {
     window.PowerSuite.log("Token not found.", "error");
@@ -388,10 +401,24 @@ window.PowerSuite.aiInjectCloze = function (translated, isCombo) {
   window.PowerSuite.aiActiveElement = null;
   window.PowerSuite.aiToken = null;
 
-  if (!isCombo) {
-    window.PowerSuite.isProcessing = false;
-  }
+  if (!isCombo) window.PowerSuite.isProcessing = false;
   return true;
+};
+
+// ==========================================
+// HELPER: Reconstruct plain sentence from cloze line
+// ==========================================
+window.PowerSuite.reconstructCloze = function (text) {
+  // 1. Strip everything in parentheses (grammar annotations)
+  let reconstructed = text.replace(/\([^)]*\)/g, " ");
+
+  // 2. Extract front side of clozes (Non-greedy matching for Anki syntax)
+  // {{c1::answer::hint}} -> answer
+  // {{c1::answer}} -> answer
+  reconstructed = reconstructed.replace(/\{\{c\d+::(.*?)(?:::.*?)?\}\}/g, "$1");
+
+  // 3. Normalize spaces
+  return reconstructed.replace(/\s{2,}/g, " ").trim();
 };
 
 // ==========================================
@@ -433,45 +460,26 @@ window.PowerSuite.ttsGetText = function () {
   }
   if (!extractedText.trim()) return "";
 
-  // EDGE CASE PROTECTIONS
-  let preText = "";
-  try {
-    const preRange = document.createRange();
-    preRange.setStart(blockElement, 0);
-    preRange.setEnd(
-      sel.getRangeAt(0).startContainer,
-      sel.getRangeAt(0).startOffset,
-    );
-    preText = preRange.toString();
-  } catch (e) {}
+  // No mapping tracker here. F9 stays anonymous.
 
-  const openCount = (preText.match(/\{\{c\d+::/g) || []).length;
-  const closeCount = (preText.match(/\}\}/g) || []).length;
-
-  if (
-    openCount > closeCount ||
-    extractedText.includes("{{c") ||
-    extractedText.includes("}}") ||
-    (isAutoExpanded && blockElement.textContent.includes("{{c"))
-  ) {
-    return "";
+  let filteredText = extractedText;
+  if (isAutoExpanded) {
+    filteredText = filteredText.replace(/\([^)]*\)/g, " ");
+    filteredText = filteredText.replace(/\{\{c\d+::(.*?)(?:::.*?)?\}\}/g, "$1");
+    filteredText = filteredText.replace(/\s{2,}/g, " ").trim();
+  } else {
+    filteredText = filteredText.trim();
   }
-
-  let filteredText = extractedText.replace(/\([^)]*\)/g, " ");
-  filteredText = filteredText.replace(/\s{2,}/g, " ").trim();
 
   if (!filteredText) return "";
 
-  window.PowerSuite.isProcessing = true; // LOCK
+  window.PowerSuite.isProcessing = true;
   window.PowerSuite.log("TTS Text extracted successfully.", "info");
   return filteredText;
 };
 
 window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
-  if (!window.PowerSuite.isProcessing) {
-    window.PowerSuite.log("Task aborted. Ignoring Audio response.", "warn");
-    return false;
-  }
+  if (!window.PowerSuite.isProcessing) return false;
 
   function getAllEditableFields(root) {
     const results = [];
@@ -496,20 +504,24 @@ window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
 
   if (editables.length === 0 || targetIndex >= editables.length) {
     window.PowerSuite.isProcessing = false;
+    window.PowerSuite.comboActiveLine = null;
     return false;
   }
 
-  const targetField = editables[targetIndex];
+  // 2. SECURE THE MAP: Attach the filename strictly to the line for Unwrap
+  if (window.PowerSuite.comboActiveLine) {
+    window.PowerSuite.comboActiveLine.setAttribute(
+      "data-combo-audio",
+      filename,
+    );
+    window.PowerSuite.comboActiveLine = null; // Clear the tracker immediately
+  }
 
-  // ==========================================
-  // FIXED: RESTORED INNERHTML BACKGROUND INJECTION
-  // This prevents cursor jumping and selection loss completely.
-  // ==========================================
+  const targetField = editables[targetIndex];
   let currentHtml = targetField.innerHTML || "";
   currentHtml = currentHtml.replace(/(<br\s*\/?>|\s)+$/gi, "");
   targetField.innerHTML = currentHtml + ` [sound:${filename}]`;
 
-  // Notify Anki UI of the shadow DOM state change
   targetField.dispatchEvent(
     new InputEvent("input", { bubbles: true, composed: true }),
   );
@@ -517,8 +529,8 @@ window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
     new Event("change", { bubbles: true, composed: true }),
   );
 
-  window.PowerSuite.log("Audio injected silently in background.", "success");
-  window.PowerSuite.isProcessing = false; // UNLOCK!
+  window.PowerSuite.log("Audio injected successfully.", "success");
+  window.PowerSuite.isProcessing = false;
   return true;
 };
 
@@ -529,7 +541,6 @@ window.PowerSuite.unwrapCloze = function () {
   let wasAborting = false;
   let tokenToKill = window.PowerSuite.aiToken;
 
-  // 1. Act as an Instant Abort Button if the script is running
   if (window.PowerSuite.isProcessing) {
     wasAborting = true;
     window.PowerSuite.isProcessing = false;
@@ -551,6 +562,13 @@ window.PowerSuite.unwrapCloze = function () {
     const html = block.innerHTML;
     const unwrapRegex = /\{\{c\d+::(.*?)(?:::.*?)?\}\}/g;
     if (unwrapRegex.test(html)) {
+      // 3. READ THE MAP: Extract the Combo audio filename BEFORE replacing HTML
+      if (block.hasAttribute("data-combo-audio")) {
+        window.PowerSuite.pendingComboKill =
+          block.getAttribute("data-combo-audio");
+        block.removeAttribute("data-combo-audio");
+      }
+
       const range = document.createRange();
       range.selectNodeContents(block);
       sel.removeAllRanges();
@@ -569,7 +587,6 @@ window.PowerSuite.unwrapCloze = function () {
     return false;
   };
 
-  // 2. Unwrapping Text Focus
   let anchor = sel.anchorNode;
   if (anchor) {
     let blockElement = anchor.nodeType === 3 ? anchor.parentNode : anchor;
@@ -583,13 +600,9 @@ window.PowerSuite.unwrapCloze = function () {
       blockElement = blockElement.parentNode;
     }
     if (!blockElement) blockElement = activeEl;
-
-    if (unwrapBlock(blockElement)) {
-      actionResult = "UNWRAPPED";
-    }
+    if (unwrapBlock(blockElement)) actionResult = "UNWRAPPED";
   }
 
-  // Global Seek-and-Destroy (In case user clicked away before hitting Abort)
   if (wasAborting && tokenToKill && actionResult === "IGNORED") {
     const walker = document.createTreeWalker(
       activeEl.shadowRoot || activeEl,
@@ -607,16 +620,15 @@ window.PowerSuite.unwrapCloze = function () {
           !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
             p.nodeName.toUpperCase(),
           )
-        ) {
+        )
           p = p.parentNode;
-        }
         if (p && unwrapBlock(p)) actionResult = "UNWRAPPED";
         break;
       }
     }
   }
 
-  // 3. Audio Cleanup (Combo Mapping Sync)
+  // 4. PRECISION KILL: Destroy ONLY the specific Combo audio
   if (!wasAborting && actionResult === "UNWRAPPED") {
     function getAllEditableFields(root) {
       const results = [];
@@ -638,31 +650,31 @@ window.PowerSuite.unwrapCloze = function () {
         el.classList.contains("editable"),
     );
 
-    for (let i = editables.length - 1; i >= 0; i--) {
-      let fieldHtml = editables[i].innerHTML;
-      const audioRegex = /\[sound:eleven_[a-f0-9]+\.mp3\](?=[^\[]*$)/;
+    let fileToKill = window.PowerSuite.pendingComboKill;
+    window.PowerSuite.pendingComboKill = null; // Clear queue
 
-      if (audioRegex.test(fieldHtml)) {
-        // ==========================================
-        // FIXED: RESTORED INNERHTML BACKGROUND REMOVAL
-        // Prevents unwrapping from breaking cursor.
-        // ==========================================
-        editables[i].innerHTML = fieldHtml.replace(audioRegex, "");
-        editables[i].dispatchEvent(
-          new InputEvent("input", { bubbles: true, composed: true }),
-        );
-
-        window.PowerSuite.log("Removed orphaned audio tag silently.", "info");
-        actionResult = "UNWRAPPED_WITH_AUDIO";
-        break; // Only remove one tag per unwrap
+    if (fileToKill) {
+      // Regex explicitly targets the mapped filename
+      const specificAudioRegex = new RegExp(`\\[sound:${fileToKill}\\]`, "g");
+      for (let i = editables.length - 1; i >= 0; i--) {
+        if (specificAudioRegex.test(editables[i].innerHTML)) {
+          editables[i].innerHTML = editables[i].innerHTML.replace(
+            specificAudioRegex,
+            "",
+          );
+          editables[i].dispatchEvent(
+            new InputEvent("input", { bubbles: true, composed: true }),
+          );
+          window.PowerSuite.log(`Removed Combo audio: ${fileToKill}`, "info");
+          actionResult = "UNWRAPPED_WITH_AUDIO";
+        }
       }
     }
+    // F9 audio is now completely safe because the fallback regex was removed!
   }
 
   if (wasAborting) return "ABORTED";
-
-  if (actionResult.startsWith("UNWRAPPED")) {
+  if (actionResult.startsWith("UNWRAPPED"))
     window.PowerSuite.log("Cloze unwrapped successfully.", "success");
-  }
   return actionResult;
 };

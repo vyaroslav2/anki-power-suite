@@ -157,8 +157,7 @@ def trigger_tts_standalone(editor: Editor):
     
     def handle_text(selected_text):
         if not selected_text: return
-        tooltip(f"Fetching Audio ({active_model})...")
-        mw.progress.start(label=f"Fetching Audio ({active_model})...", immediate=True)
+        mw.progress.start(label="Synthesising audio...", immediate=True)
         run_tts_process(editor, selected_text, config)
 
     editor.web.evalWithCallback("window.PowerSuite.ttsGetText()", handle_text)
@@ -170,8 +169,7 @@ def trigger_tts_combo_standalone(editor: Editor):
     
     def handle_text(selected_text):
         if not selected_text: return
-        tooltip("Fetching Batch Audio...")
-        mw.progress.start(label="Fetching Batch Audio...", immediate=True)
+        mw.progress.start(label="Synthesising multiple voices...", immediate=True)
         run_batch_tts_process(editor, selected_text, config, track_for_unwrap=False)
 
     editor.web.evalWithCallback("window.PowerSuite.ttsGetText()", handle_text)
@@ -184,8 +182,7 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
     def handle_extracted_text(selected_text):
         if not selected_text: return
             
-        tooltip("Gemini is thinking...")
-        mw.progress.start(label="Gemini is thinking...", immediate=True)
+        mw.progress.start(label="Analysing text and generating cloze...", immediate=True)
         ai_prompt_text = re.sub(r'\(.*?\)', '', selected_text)
         ai_prompt_text = re.sub(r'\s{2,}', ' ', ai_prompt_text).strip()
 
@@ -224,11 +221,10 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
                 if is_combo:
                     tts_settings = config.get("tts_settings", {})
                     active_model = tts_settings.get("model_id", "Unknown Model")
-                    tooltip(f"Cloze generated! Fetching Batch Audio ({active_model})...")
-                    mw.progress.start(label=f"Fetching Batch Audio ({active_model})...", immediate=True)
+                    mw.progress.start(label="Cloze generated. Synthesising voice bundle...", immediate=True)
                     run_batch_tts_process(editor, ai_prompt_text, config, track_for_unwrap=True)
                 else:
-                    tooltip("Cloze generated!")
+                    tooltip("Cloze generated.")
 
             editor.web.evalWithCallback(
                 f"window.PowerSuite.aiInjectCloze({safe_translation}, {combo_for_js});", 
@@ -244,7 +240,7 @@ def trigger_unwrapper(editor: Editor):
     inject_js(editor)
     def on_unwrapped(result):
         if result == "ABORTED":
-            tooltip("Generation Aborted.")
+            tooltip("Process aborted.")
         elif result.startswith("UNWRAPPED"):
             tooltip("Cloze unwrapped.")
             

@@ -53,6 +53,9 @@ def handle_js_message(handled: tuple[bool, object], message: str, context: objec
     # Let Anki handle normal messages
     return handled
 
+import aqt.utils
+_original_tooltip = aqt.utils.tooltip
+
 def log_tooltip(message: str, period: int = 3000, parent=None, **kwargs):
     """Intercepts Python tooltips to log them before showing, and logs when they disappear."""
     from aqt.qt import QTimer
@@ -75,5 +78,40 @@ def log_tooltip(message: str, period: int = 3000, parent=None, **kwargs):
     QTimer.singleShot(period, on_hide)
     
     # 4. Call the real Anki tooltip so it actually shows up on screen
-    from aqt.utils import tooltip
-    tooltip(message, period=period, parent=parent, **kwargs)
+    _original_tooltip(message, period=period, parent=parent, **kwargs)
+
+# Globally monkey-patch Anki's tooltip so we catch system messages like 'Processing...'
+aqt.utils.tooltip = log_tooltip
+
+# Catch native Anki progress dialogs (like the striped "Processing..." window)
+import aqt.progress
+_original_progress_start = aqt.progress.ProgressManager.start
+_original_progress_update = aqt.progress.ProgressManager.update
+_original_progress_finish = aqt.progress.ProgressManager.finish
+
+def log_progress_start(self, *args, **kwargs):
+    label = kwargs.get('label') or (args[0] if args else "Processing...")
+    write_to_log({
+        "type": "progress_start",
+        "message": label
+    })
+    return _original_progress_start(self, *args, **kwargs)
+
+def log_progress_update(self, *args, **kwargs):
+    label = kwargs.get('label') or (args[0] if args else None)
+    if label:
+        write_to_log({
+            "type": "progress_update",
+            "message": label
+        })
+    return _original_progress_update(self, *args, **kwargs)
+
+def log_progress_finish(self, *args, **kwargs):
+    write_to_log({
+        "type": "progress_finish"
+    })
+    return _original_progress_finish(self, *args, **kwargs)
+
+aqt.progress.ProgressManager.start = log_progress_start
+aqt.progress.ProgressManager.update = log_progress_update
+aqt.progress.ProgressManager.finish = log_progress_finish

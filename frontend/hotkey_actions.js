@@ -560,8 +560,10 @@ window.PowerSuite.ttsGetText = function () {
   return filteredText;
 };
 
-window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
+window.PowerSuite.ttsInjectAudio = function (filenamePayload, targetIndex, trackForUnwrap) {
   if (!window.PowerSuite.isProcessing) return false;
+
+  let filenames = Array.isArray(filenamePayload) ? filenamePayload : [filenamePayload];
 
   function getAllEditableFields(root) {
     const results = [];
@@ -591,10 +593,10 @@ window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
   }
 
   // 2. SECURE THE MAP: Attach the filename strictly to the line for Unwrap
-  if (window.PowerSuite.comboActiveLine) {
+  if (window.PowerSuite.comboActiveLine && trackForUnwrap !== false) {
     window.PowerSuite.comboActiveLine.setAttribute(
       "data-combo-audio",
-      filename,
+      JSON.stringify(filenames)
     );
     window.PowerSuite.comboActiveLine = null; // Clear the tracker immediately
   }
@@ -602,7 +604,9 @@ window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
   const targetField = editables[targetIndex];
   let currentHtml = targetField.innerHTML || "";
   currentHtml = currentHtml.replace(/(<br\s*\/?>|\s)+$/gi, "");
-  targetField.innerHTML = currentHtml + ` [sound:${filename}]`;
+  
+  let tags = filenames.map(f => `[sound:${f}]`).join(" ");
+  targetField.innerHTML = currentHtml + ` ${tags}`;
 
   targetField.dispatchEvent(
     new InputEvent("input", { bubbles: true, composed: true }),
@@ -611,7 +615,7 @@ window.PowerSuite.ttsInjectAudio = function (filename, targetIndex) {
     new Event("change", { bubbles: true, composed: true }),
   );
 
-  window.PowerSuite.log("Audio injected successfully.", "success");
+  window.PowerSuite.log(`Audio injected successfully (${filenames.length} files).`, "success");
   window.PowerSuite.isProcessing = false;
   return true;
 };
@@ -732,23 +736,32 @@ window.PowerSuite.unwrapCloze = function () {
         el.classList.contains("editable"),
     );
 
-    let fileToKill = window.PowerSuite.pendingComboKill;
+    let fileToKillPayload = window.PowerSuite.pendingComboKill;
     window.PowerSuite.pendingComboKill = null; // Clear queue
 
-    if (fileToKill) {
-      // Regex explicitly targets the mapped filename
-      const specificAudioRegex = new RegExp(`\\[sound:${fileToKill}\\]`, "g");
-      for (let i = editables.length - 1; i >= 0; i--) {
-        if (specificAudioRegex.test(editables[i].innerHTML)) {
-          editables[i].innerHTML = editables[i].innerHTML.replace(
-            specificAudioRegex,
-            "",
-          );
-          editables[i].dispatchEvent(
-            new InputEvent("input", { bubbles: true, composed: true }),
-          );
-          window.PowerSuite.log(`Removed Combo audio: ${fileToKill}`, "info");
-          actionResult = "UNWRAPPED_WITH_AUDIO";
+    if (fileToKillPayload) {
+      let filesToKill = [];
+      try {
+        filesToKill = JSON.parse(fileToKillPayload);
+      } catch(e) {
+        filesToKill = [fileToKillPayload]; // Fallback for old single string
+      }
+      
+      for (let fileToKill of filesToKill) {
+        // Regex explicitly targets the mapped filename
+        const specificAudioRegex = new RegExp(`\\[sound:${fileToKill}\\]`, "g");
+        for (let i = editables.length - 1; i >= 0; i--) {
+          if (specificAudioRegex.test(editables[i].innerHTML)) {
+            editables[i].innerHTML = editables[i].innerHTML.replace(
+              specificAudioRegex,
+              "",
+            );
+            editables[i].dispatchEvent(
+              new InputEvent("input", { bubbles: true, composed: true }),
+            );
+            window.PowerSuite.log(`Removed Combo audio: ${fileToKill}`, "info");
+            actionResult = "UNWRAPPED_WITH_AUDIO";
+          }
         }
       }
     }

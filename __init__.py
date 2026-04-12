@@ -55,6 +55,7 @@ def run_tts_process(editor: Editor, text: str, config: dict):
         return generate_audio(text, tts_settings)
         
     def on_tts_finished(future):
+        mw.progress.finish()
         filename = future.result()
         if filename.startswith("Error"):
             tooltip(filename)
@@ -83,6 +84,69 @@ def run_tts_process(editor: Editor, text: str, config: dict):
     mw.taskman.run_in_background(do_tts, on_tts_finished)
 
 
+# --- BATCH TTS WORKER (Used by Combos) ---
+def run_batch_tts_process(editor: Editor, text: str, config: dict, track_for_unwrap: bool = False):
+    import random
+    tts_settings = config.get("tts_settings", {})
+    voice_pool = tts_settings.get("voice_pool", [])
+    
+    default_voice_id = tts_settings.get("voice_id", "ZF6FPAbjXT4488VcRRnw")
+    default_slug = "Amelia"
+    for v in voice_pool:
+        if v.get("voice_id") == default_voice_id:
+            default_slug = v.get("slug", "Amelia")
+            break
+            
+    default_voice = {"voice_id": default_voice_id, "slug": default_slug}
+    
+    unique_slug_voices = {}
+    for v in voice_pool:
+        vol_slug = v.get("slug")
+        if vol_slug and vol_slug != default_slug:
+            unique_slug_voices[vol_slug] = {"voice_id": v.get("voice_id"), "slug": vol_slug}
+            
+    random_candidates = list(unique_slug_voices.values())
+    if len(random_candidates) >= 4:
+        chosen_randoms = random.sample(random_candidates, 4)
+    else:
+        chosen_randoms = random_candidates
+        
+    random.shuffle(chosen_randoms)
+    batch_voices = [default_voice] + chosen_randoms
+    
+    def do_batch():
+        filenames = []
+        for v in batch_voices:
+            res = generate_audio(text, tts_settings, voice_override=v)
+            if res.startswith("Error"):
+                return filenames, res
+            filenames.append(res)
+        return filenames, None
+        
+    def on_batch_finished(future):
+        mw.progress.finish()
+        filenames, err = future.result()
+        if err:
+            tooltip(f"TTS Failed: {err}. Generated {len(filenames)}/{len(batch_voices)}.")
+            editor.web.eval("window.PowerSuite.isProcessing = false;")
+            return
+            
+        safe_filenames = json.dumps(filenames)
+        target_idx = tts_settings.get("target_field_index", 2)
+        js_track = 'true' if track_for_unwrap else 'false'
+        
+        def on_injected(success):
+            if success and filenames:
+                file_path = os.path.join(mw.col.media.dir(), filenames[0])
+                sound.av_player.play_file(file_path)
+                
+        editor.web.evalWithCallback(
+            f"window.PowerSuite.ttsInjectAudio({safe_filenames}, {target_idx}, {js_track});", 
+            on_injected
+        )
+            
+    mw.taskman.run_in_background(do_batch, on_batch_finished)
+
 # --- STANDALONE TTS HOTKEY ---
 def trigger_tts_standalone(editor: Editor):
     inject_js(editor)
@@ -94,7 +158,21 @@ def trigger_tts_standalone(editor: Editor):
     def handle_text(selected_text):
         if not selected_text: return
         tooltip(f"Fetching Audio ({active_model})...")
+        mw.progress.start(label=f"Fetching Audio ({active_model})...", immediate=True)
         run_tts_process(editor, selected_text, config)
+
+    editor.web.evalWithCallback("window.PowerSuite.ttsGetText()", handle_text)
+
+# --- STANDALONE COMBO TTS HOTKEY (Ctrl+F9) ---
+def trigger_tts_combo_standalone(editor: Editor):
+    inject_js(editor)
+    config = load_config()
+    
+    def handle_text(selected_text):
+        if not selected_text: return
+        tooltip("Fetching Batch Audio...")
+        mw.progress.start(label="Fetching Batch Audio...", immediate=True)
+        run_batch_tts_process(editor, selected_text, config, track_for_unwrap=False)
 
     editor.web.evalWithCallback("window.PowerSuite.ttsGetText()", handle_text)
 
@@ -107,6 +185,7 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
         if not selected_text: return
             
         tooltip("Gemini is thinking...")
+        mw.progress.start(label="Gemini is thinking...", immediate=True)
         ai_prompt_text = re.sub(r'\(.*?\)', '', selected_text)
         ai_prompt_text = re.sub(r'\s{2,}', ' ', ai_prompt_text).strip()
 
@@ -114,6 +193,7 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
             return translate_via_gemini(ai_prompt_text, config.get("ai_settings", {}))
 
         def on_finished(future):
+            mw.progress.finish()
             translation = future.result()
             
             # 1. Identify if the result is an error message (catches 'Error:', 'HTTP Error', etc.)
@@ -144,8 +224,9 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
                 if is_combo:
                     tts_settings = config.get("tts_settings", {})
                     active_model = tts_settings.get("model_id", "Unknown Model")
-                    tooltip(f"Cloze generated! Fetching Audio ({active_model})...")
-                    run_tts_process(editor, ai_prompt_text, config)
+                    tooltip(f"Cloze generated! Fetching Batch Audio ({active_model})...")
+                    mw.progress.start(label=f"Fetching Batch Audio ({active_model})...", immediate=True)
+                    run_batch_tts_process(editor, ai_prompt_text, config, track_for_unwrap=True)
                 else:
                     tooltip("Cloze generated!")
 
@@ -179,6 +260,8 @@ def on_setup_shortcuts(shortcuts: list[tuple], editor: Editor):
         
     if config.get("enable_tts", True):
         shortcuts.append((hotkeys.get("tts_standalone", "F9"), lambda: trigger_tts_standalone(editor)))
+        if "tts_combo" in hotkeys:
+            shortcuts.append((hotkeys["tts_combo"], lambda: trigger_tts_combo_standalone(editor)))
         
     if config.get("enable_ai_translator", True):
         shortcuts.append((hotkeys.get("ai_translator", "F8"), lambda: trigger_ai_pipeline(editor, is_combo=False)))

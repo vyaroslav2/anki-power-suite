@@ -4,6 +4,8 @@ import urllib.request
 import urllib.error
 import ssl
 import random
+import hashlib
+import re
 from aqt import mw
 
 def get_ssl_context():
@@ -12,18 +14,44 @@ def get_ssl_context():
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
-def generate_audio(text: str, tts_config: dict) -> str:
-    """Takes pure text, fetches audio from ElevenLabs, saves it, returns filename."""
+def generate_audio(text: str, tts_config: dict, voice_override: dict = None) -> str:
+    """Takes pure text, fetches audio from ElevenLabs (or uses cached file), saves it, returns filename."""
     api_key = tts_config.get("elevenlabs_api_key")
-    voice_id = tts_config.get("voice_id", "ZF6FPAbjXT4488VcRRnw") # Defaulted to Amelia!
-    model_id = tts_config.get("model_id", "eleven_multilingual_v2") # Using the stable v2 model
+    
+    # Use override if provided (for batch generation), otherwise fallback to global defaults
+    active_voice_id = tts_config.get("voice_id", "ZF6FPAbjXT4488VcRRnw")
+    active_slug = "Amelia"
+    
+    if voice_override:
+        active_voice_id = voice_override.get("voice_id", active_voice_id)
+        active_slug = voice_override.get("slug", active_slug)
+        
+    model_id = tts_config.get("model_id", "eleven_multilingual_v2")
     
     if not api_key or api_key == "YOUR_ELEVENLABS_KEY":
         return "Error: No ElevenLabs API Key in config"
 
-    # Define the URL exactly ONCE, including the 128kbps MP3 parameter
+    # --- 1. Deterministic Filename Generation ---
+    # First 8 chars of SHA-256 over exact string
+    hash_val = hashlib.sha256(text.encode('utf-8')).hexdigest()[:8].lower()
+    
+    # Sentence slug: lowercase, remove punctuation, replace spaces with _, truncate
+    text_lower = text.lower()
+    text_no_punct = re.sub(r'[^\w\s]', '', text_lower)
+    sentence_slug = "_".join(text_no_punct.split())[:150].strip('_')
+    if not sentence_slug:
+        sentence_slug = "audio"
+        
+    filename = f"{hash_val}_{active_slug}_{sentence_slug}.mp3"
+    file_path = os.path.join(mw.col.media.dir(), filename)
+    
+    # --- 2. File Caching (Idempotency) ---
+    if os.path.exists(file_path):
+        return filename
+
+    # --- 3. Generate via API ---
     api_base = tts_config.get("api_base", "https://api.elevenlabs.io")
-    url = f"{api_base}/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
+    url = f"{api_base}/v1/text-to-speech/{active_voice_id}?output_format=mp3_44100_128"
     
     headers = {
         "Accept": "audio/mpeg",
@@ -41,12 +69,7 @@ def generate_audio(text: str, tts_config: dict) -> str:
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
 
-        with urllib.request.urlopen(req, context=get_ssl_context(), timeout=15) as response:
-            # Generate random hex for filename
-            hex_str = "".join(random.choices("0123456789abcdef", k=8))
-            filename = f"eleven_{hex_str}.mp3"
-            file_path = os.path.join(mw.col.media.dir(), filename)
-            
+        with urllib.request.urlopen(req, context=get_ssl_context(), timeout=60) as response:
             with open(file_path, 'wb') as f:
                 f.write(response.read())
                 

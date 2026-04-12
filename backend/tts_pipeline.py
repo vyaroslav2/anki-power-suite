@@ -22,7 +22,8 @@ def generate_audio(text: str, tts_config: dict) -> str:
         return "Error: No ElevenLabs API Key in config"
 
     # Define the URL exactly ONCE, including the 128kbps MP3 parameter
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
+    api_base = tts_config.get("api_base", "https://api.elevenlabs.io")
+    url = f"{api_base}/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
     
     headers = {
         "Accept": "audio/mpeg",

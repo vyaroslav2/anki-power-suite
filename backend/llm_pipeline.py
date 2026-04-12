@@ -9,9 +9,9 @@ def get_ssl_context():
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
-def list_available_models(api_key):
+def list_available_models(api_key, api_base="https://generativelanguage.googleapis.com"):
     """Debug function to find out what models this API key can see."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+    url = f"{api_base}/v1beta/models?key={api_key}"
     try:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, context=get_ssl_context()) as response:
@@ -30,7 +30,8 @@ def translate_via_gemini(text: str, ai_config: dict) -> str:
     if not api_key or api_key == "YOUR_API_KEY_HERE": 
         return "Error: No API Key in config.json"
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    api_base = ai_config.get("api_base", "https://generativelanguage.googleapis.com")
+    url = f"{api_base}/v1beta/models/{model}:generateContent?key={api_key}"
     
     # FIX: Separate the prompt rules (System) from the text (User) 
     payload = {
@@ -72,7 +73,8 @@ def translate_via_gemini(text: str, ai_config: dict) -> str:
     except urllib.error.HTTPError as e:
         err_body = e.read().decode('utf-8')
         if e.code == 404:
-            available = list_available_models(api_key)
+            api_base = ai_config.get("api_base", "https://generativelanguage.googleapis.com")
+            available = list_available_models(api_key, api_base)
             return f"Error 404: Model '{model}' not found.\n\nAvailable models:\n{available}"
         return f"HTTP Error {e.code}: {err_body}"
     except Exception as e:

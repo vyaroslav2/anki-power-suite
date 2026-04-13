@@ -394,6 +394,8 @@ window.PowerSuite.aiGetText = function () {
   // Clean text strictly for Gemini's prompt (strips all HTML)
   const divForText = document.createElement("div");
   divForText.innerHTML = innerHTML;
+  // Remove .pill elements so grammar-note badges don't pollute the AI prompt
+  divForText.querySelectorAll(".pill").forEach((el) => el.remove());
   const cleanTextForAI = divForText.textContent || divForText.innerText || "";
 
   window.PowerSuite.aiToken = "[[AI_TRANSLATING_" + Date.now() + "]]";
@@ -491,6 +493,12 @@ window.PowerSuite.aiInjectCloze = function (translated, isCombo) {
 // HELPER: Reconstruct plain sentence from cloze line
 // ==========================================
 window.PowerSuite.reconstructCloze = function (text) {
+  // 0. Strip .pill spans via DOM so grammar-note badges don't reach TTS
+  const tmpDiv = document.createElement("div");
+  tmpDiv.innerHTML = text;
+  tmpDiv.querySelectorAll(".pill").forEach((el) => el.remove());
+  text = tmpDiv.innerHTML;
+
   // 1. Strip everything in parentheses (grammar annotations)
   let reconstructed = text.replace(/\([^)]*\)/g, " ");
 
@@ -499,7 +507,10 @@ window.PowerSuite.reconstructCloze = function (text) {
   // {{c1::answer}} -> answer
   reconstructed = reconstructed.replace(/\{\{c\d+::(.*?)(?:::.*?)?\}\}/g, "$1");
 
-  // 3. Normalize spaces
+  // 3. Strip any remaining HTML tags left after DOM surgery
+  reconstructed = reconstructed.replace(/<[^>]+>/g, " ");
+
+  // 4. Normalize spaces
   return reconstructed.replace(/\s{2,}/g, " ").trim();
 };
 
@@ -518,7 +529,7 @@ window.PowerSuite.ttsGetText = function () {
     : window.getSelection();
   if (!sel || !sel.rangeCount) return "";
 
-  let extractedText = sel.toString();
+  let extractedText = "";
   let isAutoExpanded = false;
   let anchor = sel.anchorNode;
 
@@ -536,9 +547,20 @@ window.PowerSuite.ttsGetText = function () {
   }
   if (!blockElement) blockElement = activeEl;
 
-  if (!extractedText.trim()) {
+  // Clone content and strip .pill spans so grammar badges never reach the TTS API
+  const raw = sel.toString();
+  if (!raw.trim()) {
     isAutoExpanded = true;
-    extractedText = blockElement.innerText || blockElement.textContent || "";
+    const clone = blockElement.cloneNode(true);
+    clone.querySelectorAll(".pill").forEach((el) => el.remove());
+    extractedText = clone.innerText || clone.textContent || "";
+  } else {
+    // Manual selection: clone the fragment, strip .pill, then read text
+    const frag = sel.getRangeAt(0).cloneContents();
+    const wrapper = document.createElement("div");
+    wrapper.appendChild(frag);
+    wrapper.querySelectorAll(".pill").forEach((el) => el.remove());
+    extractedText = wrapper.textContent || "";
   }
   if (!extractedText.trim()) return "";
 

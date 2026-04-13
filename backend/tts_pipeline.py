@@ -6,6 +6,7 @@ import ssl
 import random
 import hashlib
 import re
+import time
 from aqt import mw
 
 def get_ssl_context():
@@ -14,7 +15,7 @@ def get_ssl_context():
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
-def generate_audio(text: str, tts_config: dict, voice_override: dict = None) -> str:
+def generate_audio(text: str, tts_config: dict, voice_override: dict = None, abort_check=None, on_retry=None) -> str:
     """Takes pure text, fetches audio from ElevenLabs (or uses cached file), saves it, returns filename."""
     api_key = tts_config.get("elevenlabs_api_key")
     
@@ -65,18 +66,47 @@ def generate_audio(text: str, tts_config: dict, voice_override: dict = None) -> 
         "voice_settings": {"stability": 0.5, "similarity_boost": 0.5}
     }
 
-    try:
-        data = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    data = json.dumps(payload).encode('utf-8')
+    ssl_context = get_ssl_context()
+    
+    retryable_codes = {429, 500, 503, 504}
+    max_retries = 3
+    
+    for attempt in range(max_retries + 1):
+        if abort_check and abort_check():
+            return "Error: Process aborted by user."
+            
+        try:
+            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, context=ssl_context, timeout=60) as response:
+                with open(file_path, 'wb') as f:
+                    f.write(response.read())
+                return filename
 
-        with urllib.request.urlopen(req, context=get_ssl_context(), timeout=60) as response:
-            with open(file_path, 'wb') as f:
-                f.write(response.read())
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode('utf-8')
+            
+            if e.code in retryable_codes and attempt < max_retries:
+                if e.code == 500 and attempt > 0:
+                    return f"Error {e.code}: {err_body}"
+                    
+                wait_time = 2 ** (attempt + 1)
+                retry_after = e.headers.get('Retry-After')
+                if retry_after and retry_after.isdigit():
+                    wait_time = min(int(retry_after), 30)
                 
-            return filename
-
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode('utf-8')
-        return f"Error {e.code}: {err_body}"
-    except Exception as e:
-        return f"Error: {str(e)}"
+                if on_retry:
+                    on_retry(attempt + 1, max_retries, e.code, "")
+                
+                sleep_intervals = 10
+                for _ in range(sleep_intervals):
+                    if abort_check and abort_check():
+                        return "Error: Process aborted by user."
+                    time.sleep(wait_time / sleep_intervals)
+                continue
+                
+            return f"Error {e.code}: {err_body}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+    
+    return "Error: Maximum retries exhausted."

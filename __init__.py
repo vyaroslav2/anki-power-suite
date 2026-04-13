@@ -77,12 +77,23 @@ def _handle_abort_pycmd(handled, message, context):
     return handled
 
 
+# --- RETRY CALLBACK ---
+def _create_retry_callback(editor: Editor):
+    def on_retry(attempt, max_retries, code, context=""):
+        msg = f"API busy ({code}) — retrying ({attempt}/{max_retries})..."
+        if context:
+            msg = context
+        mw.taskman.run_on_main(lambda: _update_progress(editor, msg))
+    return on_retry
+
+
 # --- CORE TTS WORKER (Used by both Standalone and Combo) ---
 def run_tts_process(editor: Editor, text: str, config: dict):
     tts_settings = config.get("tts_settings", {})
+    on_retry = _create_retry_callback(editor)
     
     def do_tts():
-        return generate_audio(text, tts_settings)
+        return generate_audio(text, tts_settings, abort_check=lambda: _abort_flag, on_retry=on_retry)
         
     def on_tts_finished(future):
         if _abort_flag:
@@ -147,12 +158,14 @@ def run_batch_tts_process(editor: Editor, text: str, config: dict, track_for_unw
     random.shuffle(chosen_randoms)
     batch_voices = [default_voice] + chosen_randoms
     
+    on_retry = _create_retry_callback(editor)
+    
     def do_batch():
         filenames = []
         for v in batch_voices:
             if _abort_flag:
                 return filenames, "CANCELLED"
-            res = generate_audio(text, tts_settings, voice_override=v)
+            res = generate_audio(text, tts_settings, voice_override=v, abort_check=lambda: _abort_flag, on_retry=on_retry)
             if res.startswith("Error"):
                 return filenames, res
             filenames.append(res)
@@ -224,8 +237,10 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
         ai_prompt_text = re.sub(r'\(.*?\)', '', selected_text)
         ai_prompt_text = re.sub(r'\s{2,}', ' ', ai_prompt_text).strip()
 
+        on_retry = _create_retry_callback(editor)
+
         def do_work():
-            return translate_via_gemini(ai_prompt_text, config.get("ai_settings", {}))
+            return translate_via_gemini(ai_prompt_text, config.get("ai_settings", {}), abort_check=lambda: _abort_flag, on_retry=on_retry)
 
         def on_finished(future):
             if _abort_flag:

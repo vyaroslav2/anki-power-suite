@@ -75,3 +75,74 @@ window.PowerSuite = window.PowerSuite || {
 
 // Initialize the style enforcer immediately when the editor loads
 window.PowerSuite.enforceDelStyles();
+
+// --- Processing Lock Overlay ---
+// Replaces mw.progress to avoid Qt focus stealing and popup flicker.
+// A transparent overlay blocks all mouse/keyboard interaction in the editor webview.
+window.PowerSuite.showLock = function (message, lockType) {
+  window.PowerSuite.hideLock();
+  window.PowerSuite._lockType = lockType || "unknown";
+
+  const overlay = document.createElement("div");
+  overlay.id = "ps-lock-overlay";
+  overlay.style.cssText =
+    "position:fixed;top:0;left:0;width:100%;height:100%;z-index:99999;background:transparent;";
+  overlay.addEventListener(
+    "mousedown",
+    function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    true,
+  );
+
+  const pill = document.createElement("div");
+  pill.id = "ps-lock-label";
+  pill.style.cssText =
+    "position:fixed;top:8px;left:50%;transform:translateX(-50%);" +
+    "background:rgba(30,30,30,0.9);color:#ccc;padding:6px 18px;border-radius:20px;" +
+    "font:12px/1.4 -apple-system,BlinkMacSystemFont,sans-serif;z-index:100000;" +
+    "pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,0.3);";
+  pill.textContent = message;
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(pill);
+
+  window.PowerSuite._lockKeyHandler = function (e) {
+    if (e.key === "Escape") {
+      var lt = window.PowerSuite._lockType;
+      if (lt === "ai" || lt === "combo") {
+        window.PowerSuite.unwrapCloze();
+      } else {
+        window.PowerSuite.isProcessing = false;
+      }
+      window.PowerSuite.hideLock();
+      pycmd("ps__abort");
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+  };
+  document.addEventListener("keydown", window.PowerSuite._lockKeyHandler, true);
+};
+
+window.PowerSuite.updateLock = function (message) {
+  var label = document.getElementById("ps-lock-label");
+  if (label) label.textContent = message;
+};
+
+window.PowerSuite.hideLock = function () {
+  var overlay = document.getElementById("ps-lock-overlay");
+  var label = document.getElementById("ps-lock-label");
+  if (overlay) overlay.remove();
+  if (label) label.remove();
+  if (window.PowerSuite._lockKeyHandler) {
+    document.removeEventListener(
+      "keydown",
+      window.PowerSuite._lockKeyHandler,
+      true,
+    );
+    window.PowerSuite._lockKeyHandler = null;
+  }
+  window.PowerSuite._lockType = null;
+};

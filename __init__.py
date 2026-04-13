@@ -47,6 +47,36 @@ def trigger_formatter(editor: Editor):
     editor.web.eval("window.PowerSuite.formatCurrentLine();")
 
 
+# --- PROCESSING LOCK (JS overlay replaces mw.progress to avoid focus stealing) ---
+_abort_flag = False
+
+def _start_progress(editor: Editor, message: str, lock_type: str = "unknown"):
+    """Show the JS lock overlay and reset the abort flag."""
+    global _abort_flag
+    _abort_flag = False
+    safe_msg = json.dumps(message)
+    safe_type = json.dumps(lock_type)
+    editor.web.eval(f"window.PowerSuite.showLock({safe_msg}, {safe_type})")
+
+def _update_progress(editor: Editor, message: str):
+    """Update the lock overlay label text."""
+    safe_msg = json.dumps(message)
+    editor.web.eval(f"window.PowerSuite.updateLock({safe_msg})")
+
+def _finish_progress(editor: Editor):
+    """Remove the lock overlay."""
+    editor.web.eval("window.PowerSuite.hideLock()")
+
+def _handle_abort_pycmd(handled, message, context):
+    """Receive abort signal from JS Esc key handler."""
+    global _abort_flag
+    if message == "ps__abort":
+        _abort_flag = True
+        tooltip("Process aborted.")
+        return (True, None)
+    return handled
+
+
 # --- CORE TTS WORKER (Used by both Standalone and Combo) ---
 def run_tts_process(editor: Editor, text: str, config: dict):
     tts_settings = config.get("tts_settings", {})
@@ -55,7 +85,10 @@ def run_tts_process(editor: Editor, text: str, config: dict):
         return generate_audio(text, tts_settings)
         
     def on_tts_finished(future):
-        mw.progress.finish()
+        if _abort_flag:
+            _finish_progress(editor)
+            return
+        _finish_progress(editor)
         filename = future.result()
         if filename.startswith("Error"):
             tooltip(filename)
@@ -117,6 +150,8 @@ def run_batch_tts_process(editor: Editor, text: str, config: dict, track_for_unw
     def do_batch():
         filenames = []
         for v in batch_voices:
+            if _abort_flag:
+                return filenames, "CANCELLED"
             res = generate_audio(text, tts_settings, voice_override=v)
             if res.startswith("Error"):
                 return filenames, res
@@ -124,8 +159,11 @@ def run_batch_tts_process(editor: Editor, text: str, config: dict, track_for_unw
         return filenames, None
         
     def on_batch_finished(future):
-        mw.progress.finish()
         filenames, err = future.result()
+        if err == "CANCELLED" or _abort_flag:
+            _finish_progress(editor)
+            return
+        _finish_progress(editor)
         if err:
             tooltip(f"TTS Failed: {err}. Generated {len(filenames)}/{len(batch_voices)}.")
             editor.web.eval("window.PowerSuite.isProcessing = false;")
@@ -157,7 +195,7 @@ def trigger_tts_standalone(editor: Editor):
     
     def handle_text(selected_text):
         if not selected_text: return
-        mw.progress.start(label="Synthesising audio...", immediate=True)
+        _start_progress(editor, "Synthesising audio...", "tts")
         run_tts_process(editor, selected_text, config)
 
     editor.web.evalWithCallback("window.PowerSuite.ttsGetText()", handle_text)
@@ -169,7 +207,7 @@ def trigger_tts_combo_standalone(editor: Editor):
     
     def handle_text(selected_text):
         if not selected_text: return
-        mw.progress.start(label="Synthesising multiple voices...", immediate=True)
+        _start_progress(editor, "Synthesising multiple voices...", "tts_batch")
         run_batch_tts_process(editor, selected_text, config, track_for_unwrap=False)
 
     editor.web.evalWithCallback("window.PowerSuite.ttsGetText()", handle_text)
@@ -182,7 +220,7 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
     def handle_extracted_text(selected_text):
         if not selected_text: return
             
-        mw.progress.start(label="Analysing text and generating cloze...", immediate=True)
+        _start_progress(editor, "Analysing text and generating cloze...", "combo" if is_combo else "ai")
         ai_prompt_text = re.sub(r'\(.*?\)', '', selected_text)
         ai_prompt_text = re.sub(r'\s{2,}', ' ', ai_prompt_text).strip()
 
@@ -190,7 +228,9 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
             return translate_via_gemini(ai_prompt_text, config.get("ai_settings", {}))
 
         def on_finished(future):
-            mw.progress.finish()
+            if _abort_flag:
+                _finish_progress(editor)
+                return
             translation = future.result()
             
             # 1. Identify if the result is an error message (catches 'Error:', 'HTTP Error', etc.)
@@ -210,20 +250,21 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
             
             # 4. Check if user aborted during the AI wait time.
             def on_injected(success):
-                if not success:
-                    return # Task was aborted manually! Do not trigger TTS or show ghostly tooltips.
+                if not success or _abort_flag:
+                    _finish_progress(editor)
+                    return
                 
                 if is_error:
+                    _finish_progress(editor)
                     msg = "AI Error pasted in editor. Combo aborted." if is_combo else "AI Error pasted in editor."
                     tooltip(msg)
-                    return # Abort here to completely block TTS from firing
+                    return
                 
                 if is_combo:
-                    tts_settings = config.get("tts_settings", {})
-                    active_model = tts_settings.get("model_id", "Unknown Model")
-                    mw.progress.start(label="Cloze generated. Synthesising voice bundle...", immediate=True)
+                    _update_progress(editor, "Cloze generated. Synthesising voice bundle...")
                     run_batch_tts_process(editor, ai_prompt_text, config, track_for_unwrap=True)
                 else:
+                    _finish_progress(editor)
                     tooltip("Cloze generated.")
 
             editor.web.evalWithCallback(
@@ -239,7 +280,10 @@ def trigger_ai_pipeline(editor: Editor, is_combo=False):
 def trigger_unwrapper(editor: Editor):
     inject_js(editor)
     def on_unwrapped(result):
+        global _abort_flag
         if result == "ABORTED":
+            _abort_flag = True
+            _finish_progress(editor)
             tooltip("Process aborted.")
         elif result.startswith("UNWRAPPED"):
             tooltip("Cloze unwrapped.")
@@ -271,3 +315,4 @@ gui_hooks.editor_did_init.append(on_editor_init)
 gui_hooks.editor_did_init_shortcuts.append(on_setup_shortcuts)
 gui_hooks.editor_did_init.append(wipe_log_on_init)
 gui_hooks.webview_did_receive_js_message.append(handle_js_message)
+gui_hooks.webview_did_receive_js_message.append(_handle_abort_pycmd)

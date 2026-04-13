@@ -1,15 +1,35 @@
 {
   "enable_line_formatter": true,
-  "enable_smart_trim": false,
+  "enable_smart_trim": true,
   "enable_ai_translator": true,
+  "enable_tts": true,
   "hotkeys": {
     "line_formatter": "Alt+Shift+Q",
     "ai_translator": "F8",
-    "ai_combo": "Ctrl+F10"
+    "tts_standalone": "F9",
+    "tts_combo": "Ctrl+F9",
+    "ai_combo": "Ctrl+F10",
+    "unwrap_cloze": "Alt+Shift+U"
   },
   "ai_settings": {
     "gemini_api_key": "YOUR_API_KEY_HERE",
     "model_name": "gemini-2.5-flash",
+    "model_fallback": [
+      "gemini-2.5-flash-lite"
+    ],
     "prompt_prefix": "Translate English to Russian specifically for a verbatim back-translation grammar exercise.\nRules:\n1. The Golden Rule (Hierarchy): Natural Russian phrasing is your highest priority. Never generate awkward, robotic, or \"translationese\" Russian. However, within the bounds of natural Russian, make choices that mirror the English original.\n2. Word Order: When Russian grammar allows for multiple natural word orders, choose the one that aligns closest to the English S-V-O-Time/Place structure.\n3. Vocabulary & Pronouns: Strive for 1:1 word mapping only when it sounds natural. Do not force awkward literal translations. Retain subject pronouns to preserve the English subject, even if conversational Russian would normally drop them.\n4. Strict Output: Output ONLY the Russian translation. No explanations, no quotes, and no extra text."
+  },
+  "tts_settings": {
+    "elevenlabs_api_key": "YOUR_ELEVENLABS_KEY",
+    "voice_id": "ZF6FPAbjXT4488VcRRnw",
+    "model_id": "eleven_multilingual_v2",
+    "target_field_index": 2,
+    "voice_pool": [
+      {
+        "name": "Amelia",
+        "voice_id": "ZF6FPAbjXT4488VcRRnw",
+        "slug": "Amelia"
+      }
+    ]
   }
 }

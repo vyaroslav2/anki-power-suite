@@ -400,8 +400,13 @@ window.PowerSuite.aiGetText = function () {
 
   window.PowerSuite.aiToken = "[[AI_TRANSLATING_" + Date.now() + "]]";
 
+  // Strip <i> tags from cloze content so it appears roman in the editor.
+  // Review-side roman is handled by .cloze { font-style: normal } in the card template.
+  // Only bare <i>/</i> tags are removed; .del spans (inline font-style) are untouched.
+  const clozeInnerHTML = innerHTML.replace(/<\/?i>/gi, "");
+
   // Build the skeleton, sandwiching the clean HTML between the extracted spacing
-  const skeletonHTML = `${prefix}{{c1::${innerHTML}::${window.PowerSuite.aiToken}}}${suffix}${leftoverHTML}`;
+  const skeletonHTML = `${prefix}{{c1::${clozeInnerHTML}::${window.PowerSuite.aiToken}}}${suffix}${leftoverHTML}`;
 
   sel.removeAllRanges();
   sel.addRange(range);
@@ -682,10 +687,13 @@ window.PowerSuite.unwrapCloze = function () {
       sel.removeAllRanges();
       sel.addRange(range);
 
+      // Re-wrap in <i> on unwrap only if the line was formatted (data-anki-fmt="1").
+      // This preserves perfect italic+indent formatting for copy-paste to subsequent cards.
+      const shouldItalicise = block.dataset.ankiFmt === "1";
       document.execCommand(
         "insertHTML",
         false,
-        html.replace(unwrapRegex, "$1"),
+        html.replace(unwrapRegex, shouldItalicise ? "<i>$1</i>" : "$1"),
       );
       block.dispatchEvent(
         new InputEvent("input", { bubbles: true, composed: true }),

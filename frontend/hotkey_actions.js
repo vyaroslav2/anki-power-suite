@@ -50,8 +50,14 @@ window.PowerSuite.formatCurrentLine = function () {
             ) {
               allNodes.push(document.createElement("br"));
             }
+            
+            let lenBefore = allNodes.length;
             process(node.childNodes);
-            if (
+            let lenAfter = allNodes.length;
+            
+            if (lenBefore === lenAfter) {
+              allNodes.push(document.createElement("br"));
+            } else if (
               allNodes.length > 0 &&
               allNodes[allNodes.length - 1].nodeName !== "BR"
             ) {
@@ -64,10 +70,10 @@ window.PowerSuite.formatCurrentLine = function () {
       };
       process(root.childNodes);
 
-      root.innerHTML = "";
+      const frag = document.createDocumentFragment();
       let currentDiv = document.createElement("div");
       currentDiv.style.margin = "0";
-      root.appendChild(currentDiv);
+      frag.appendChild(currentDiv);
 
       allNodes.forEach((node, index) => {
         if (node.nodeName === "BR") {
@@ -75,21 +81,24 @@ window.PowerSuite.formatCurrentLine = function () {
           if (index < allNodes.length - 1) {
             currentDiv = document.createElement("div");
             currentDiv.style.margin = "0";
-            root.appendChild(currentDiv);
+            frag.appendChild(currentDiv);
           }
         } else {
           currentDiv.appendChild(node);
         }
       });
 
-      root.querySelectorAll("div").forEach((div) => {
+      frag.querySelectorAll("b, i").forEach((el) => {
+        if (el.textContent.trim() === "" && !el.querySelector("span"))
+          el.remove();
+      });
+
+      frag.querySelectorAll("div").forEach((div) => {
         if (div.innerHTML.trim() === "") div.innerHTML = "<br>";
       });
 
-      root.querySelectorAll("b, i").forEach((el) => {
-        if (el.innerText.trim() === "" && !el.querySelector("span"))
-          el.remove();
-      });
+      root.innerHTML = "";
+      root.appendChild(frag);
     }
 
     normalize(editableRoot);
@@ -113,7 +122,7 @@ window.PowerSuite.formatCurrentLine = function () {
     }
 
     const refLine =
-      scope.find((l) => l.innerText.trim().length > 0) || scope[0];
+      scope.find((l) => l.textContent.trim().length > 0) || scope[0];
     const hasIndent = indentRegex.test(refLine.innerHTML);
     const hasItalics = refLine.querySelector("i") !== null;
     const shouldUnformat =
@@ -122,7 +131,7 @@ window.PowerSuite.formatCurrentLine = function () {
     scope.forEach((line) => {
       if (line.nodeType !== 1) return;
 
-      const visibleText = line.innerText.trim();
+      const visibleText = line.textContent.trim();
       const isBlank = visibleText.length === 0;
 
       let html = line.innerHTML;

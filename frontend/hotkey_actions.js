@@ -41,29 +41,38 @@ window.PowerSuite.formatCurrentLine = function () {
 
     function normalize(root) {
       let allNodes = [];
-      const process = (nodes) => {
+      const process = (nodes, inheritedDataset = {}) => {
         Array.from(nodes).forEach((node) => {
           if (node.nodeName === "DIV" || node.nodeName === "P") {
+            let currentDataset = { ...inheritedDataset, ...node.dataset };
+
             if (
               allNodes.length > 0 &&
               allNodes[allNodes.length - 1].nodeName !== "BR"
             ) {
-              allNodes.push(document.createElement("br"));
+              let br = document.createElement("br");
+              br.__tempDataset = currentDataset;
+              allNodes.push(br);
             }
             
             let lenBefore = allNodes.length;
-            process(node.childNodes);
+            process(node.childNodes, currentDataset);
             let lenAfter = allNodes.length;
             
             if (lenBefore === lenAfter) {
-              allNodes.push(document.createElement("br"));
+              let br = document.createElement("br");
+              br.__tempDataset = currentDataset;
+              allNodes.push(br);
             } else if (
               allNodes.length > 0 &&
               allNodes[allNodes.length - 1].nodeName !== "BR"
             ) {
-              allNodes.push(document.createElement("br"));
+              let br = document.createElement("br");
+              br.__tempDataset = currentDataset;
+              allNodes.push(br);
             }
           } else {
+            node.__tempDataset = inheritedDataset;
             allNodes.push(node);
           }
         });
@@ -76,6 +85,14 @@ window.PowerSuite.formatCurrentLine = function () {
       frag.appendChild(currentDiv);
 
       allNodes.forEach((node, index) => {
+        let dataset = node.__tempDataset;
+        if (dataset && !currentDiv._hasAssignedDataset) {
+          for (let key in dataset) {
+            currentDiv.dataset[key] = dataset[key];
+          }
+          currentDiv._hasAssignedDataset = true;
+        }
+
         if (node.nodeName === "BR") {
           if (currentDiv.childNodes.length === 0) currentDiv.innerHTML = "<br>";
           if (index < allNodes.length - 1) {

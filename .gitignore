@@ -9,7 +9,7 @@ __pycache__/
 # Ignore log files
 *.log
 debug.log
-debug.jsonl
+debug*.jsonl
 
 # Ignore OS files
 .DS_Store

@@ -126,6 +126,28 @@ def generate_audio(text: str, tts_config: TTSSettings, voice_override: dict = No
                 continue
                 
             return f"Error {e.code}: {err_body}"
+        except (urllib.error.URLError, TimeoutError) as e:
+            reason = getattr(e, 'reason', str(e))
+            write_to_log({
+                "type": "api_error_tts_network",
+                "model": model_id,
+                "attempt": attempt,
+                "voice_id": active_voice_id,
+                "reason": str(reason)
+            })
+            
+            if attempt < max_retries:
+                wait_time = 2 ** (attempt + 1)
+                if on_retry:
+                    on_retry(attempt + 1, max_retries, "Timeout/Net", "")
+                
+                sleep_intervals = 10
+                for _ in range(sleep_intervals):
+                    if abort_check and abort_check():
+                        return "Error: Process aborted by user."
+                    time.sleep(wait_time / sleep_intervals)
+                continue
+            return f"Error Network: {reason}"
         except Exception as e:
             return f"Error: {str(e)}"
     

@@ -140,6 +140,29 @@ def translate_via_gemini(text: str, ai_config: AISettings, abort_check=None, on_
                     continue # Try again
                 else:
                     break # Exhausted retries or non-retryable error, move to next model
+            except (urllib.error.URLError, TimeoutError) as e:
+                reason = getattr(e, 'reason', str(e))
+                write_to_log({
+                    "type": "api_error_llm_network",
+                    "model": current_model,
+                    "attempt": attempt,
+                    "reason": str(reason)
+                })
+                last_error = f"Network Error ({current_model}): {reason}"
+                
+                if attempt < max_retries:
+                    wait_time = 2 ** (attempt + 1)
+                    if on_retry:
+                        on_retry(attempt + 1, max_retries, "Timeout/Net", "")
+                    
+                    sleep_intervals = 10
+                    for _ in range(sleep_intervals):
+                        if abort_check and abort_check():
+                            return "Error: Process aborted by user."
+                        time.sleep(wait_time / sleep_intervals)
+                    continue
+                else:
+                    break
             except Exception as e:
                 last_error = f"General Error ({current_model}): {str(e)}"
                 break # Move to next model

@@ -17,7 +17,39 @@ def get_ssl_context():
 
 from ..types import TTSSettings
 
-def generate_audio(text: str, tts_config: TTSSettings, voice_override: dict = None, abort_check=None, on_retry=None) -> str:
+def build_tts_filename(text: str, tts_config: TTSSettings, voice_override: dict = None) -> str:
+    # Use override if provided (for batch generation), otherwise fallback to global defaults
+    active_slug = "Amelia"
+    if voice_override:
+        active_slug = voice_override.get("slug", active_slug)
+
+    # First 8 chars of SHA-256 over exact string
+    hash_val = hashlib.sha256(text.encode('utf-8')).hexdigest()[:8].lower()
+
+    # Sentence slug: lowercase, remove punctuation, replace spaces with _, truncate
+    text_lower = text.lower()
+    text_no_punct = re.sub(r'[^\w\s]', '', text_lower)
+    sentence_slug = "_".join(text_no_punct.split())[:150].strip('_')
+    if not sentence_slug:
+        sentence_slug = "audio"
+
+    return f"{hash_val}_{active_slug}_{sentence_slug}.mp3"
+
+
+def tts_cache_exists(text: str, tts_config: TTSSettings, voice_override: dict = None) -> bool:
+    filename = build_tts_filename(text, tts_config, voice_override)
+    file_path = os.path.join(mw.col.media.dir(), filename)
+    return os.path.exists(file_path)
+
+
+def generate_audio(
+    text: str,
+    tts_config: TTSSettings,
+    voice_override: dict = None,
+    abort_check=None,
+    on_retry=None,
+    force: bool = False,
+) -> str:
     from .logger import write_to_log
     """Takes pure text, fetches audio from ElevenLabs (or uses cached file), saves it, returns filename."""
     api_key = tts_config.get("elevenlabs_api_key")
@@ -36,22 +68,22 @@ def generate_audio(text: str, tts_config: TTSSettings, voice_override: dict = No
         return "Error: No ElevenLabs API Key in config"
 
     # --- 1. Deterministic Filename Generation ---
-    # First 8 chars of SHA-256 over exact string
-    hash_val = hashlib.sha256(text.encode('utf-8')).hexdigest()[:8].lower()
-    
-    # Sentence slug: lowercase, remove punctuation, replace spaces with _, truncate
-    text_lower = text.lower()
-    text_no_punct = re.sub(r'[^\w\s]', '', text_lower)
-    sentence_slug = "_".join(text_no_punct.split())[:150].strip('_')
-    if not sentence_slug:
-        sentence_slug = "audio"
-        
-    filename = f"{hash_val}_{active_slug}_{sentence_slug}.mp3"
+    filename = build_tts_filename(text, tts_config, voice_override)
     file_path = os.path.join(mw.col.media.dir(), filename)
     
-    # --- 2. File Caching (Idempotency) ---
+    # --- 2. File Caching (Idempotency / Forced Regeneration) ---
     if os.path.exists(file_path):
-        return filename
+        if force:
+            try:
+                os.remove(file_path)
+                write_to_log({
+                    "type": "tts_cache_forced_delete",
+                    "filename": filename
+                })
+            except Exception as e:
+                return f"Error: Failed to delete cached audio: {str(e)}"
+        else:
+            return filename
 
     # --- 3. Generate via API ---
     api_base = tts_config.get("api_base", "https://api.elevenlabs.io")

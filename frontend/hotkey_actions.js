@@ -546,7 +546,10 @@ window.PowerSuite.reconstructCloze = function (text) {
   // 3. Strip any remaining HTML tags left after DOM surgery
   reconstructed = reconstructed.replace(/<[^>]+>/g, " ");
 
-  // 4. Normalize spaces
+  // 4. Strip existing Anki sound tags so old audio markup never pollutes TTS text
+  reconstructed = reconstructed.replace(/\[sound:[^\]]+\]/gi, " ");
+
+  // 5. Normalize spaces
   return reconstructed.replace(/\s{2,}/g, " ").trim();
 };
 
@@ -606,8 +609,10 @@ window.PowerSuite.ttsGetText = function () {
   if (isAutoExpanded) {
     filteredText = filteredText.replace(/\([^)]*\)/g, " ");
     filteredText = filteredText.replace(/\{\{c\d+::(.*?)(?:::.*?)?\}\}/g, "$1");
+    filteredText = filteredText.replace(/\[sound:[^\]]+\]/gi, " ");
     filteredText = filteredText.replace(/\s{2,}/g, " ").trim();
   } else {
+    filteredText = filteredText.replace(/\[sound:[^\]]+\]/gi, " ");
     filteredText = filteredText.trim();
   }
 
@@ -662,9 +667,19 @@ window.PowerSuite.ttsInjectAudio = function (filenamePayload, targetIndex, track
   const targetField = editables[targetIndex];
   let currentHtml = targetField.innerHTML || "";
   currentHtml = currentHtml.replace(/(<br\s*\/?>|\s)+$/gi, "");
-  
-  let tags = filenames.map(f => `[sound:${f}]`).join(" ");
-  targetField.innerHTML = currentHtml + ` ${tags}`;
+
+  const existingHtml = currentHtml;
+  const tagsToAppend = filenames
+    .map((f) => `[sound:${f}]`)
+    .filter((tag) => !existingHtml.includes(tag));
+
+  if (tagsToAppend.length === 0) {
+    window.PowerSuite.log("Audio tags already present; skipping duplicate injection.", "info");
+    window.PowerSuite.isProcessing = false;
+    return true;
+  }
+
+  targetField.innerHTML = `${currentHtml} ${tagsToAppend.join(" ")}`;
 
   targetField.dispatchEvent(
     new InputEvent("input", { bubbles: true, composed: true }),
@@ -673,7 +688,7 @@ window.PowerSuite.ttsInjectAudio = function (filenamePayload, targetIndex, track
     new Event("change", { bubbles: true, composed: true }),
   );
 
-  window.PowerSuite.log(`Audio injected successfully (${filenames.length} files).`, "success");
+  window.PowerSuite.log(`Audio injected successfully (${tagsToAppend.length} new files).`, "success");
   window.PowerSuite.isProcessing = false;
   return true;
 };

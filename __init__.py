@@ -6,7 +6,7 @@ from aqt.editor import Editor
 from .backend.logger import wipe_log_on_init, handle_js_message, log_tooltip as tooltip, write_to_log
 
 from .backend.llm_pipeline import translate_via_gemini
-from .backend.tts_pipeline import generate_audio
+from .backend.tts_pipeline import generate_audio, tts_cache_exists
 
 ADDON_PATH = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(ADDON_PATH, "config.json")
@@ -147,6 +147,52 @@ def run_tts_process(editor: Editor, text: str, config: Config):
     mw.taskman.run_in_background(do_tts, on_tts_finished)
 
 
+# --- CORE TTS REGEN WORKER (Shift+F9: force refresh) ---
+def run_tts_regen_process(editor: Editor, text: str, config: Config):
+    tts_settings = config.get("tts_settings", {})
+    on_retry = _create_retry_callback(editor)
+
+    def do_tts():
+        return generate_audio(
+            text,
+            tts_settings,
+            abort_check=lambda: _abort_flag,
+            on_retry=on_retry,
+            force=True,
+        )
+
+    def on_tts_finished(future):
+        if _abort_flag:
+            _finish_progress(editor)
+            return
+        _finish_progress(editor)
+        filename = future.result()
+        if filename.startswith("Error"):
+            tooltip(filename)
+            editor.web.eval("window.PowerSuite.isProcessing = false;")
+            return
+
+        safe_filename = json.dumps(filename)
+        target_idx = tts_settings.get("target_field_index", 2)
+
+        def on_injected(success):
+            if success:
+                file_path = os.path.join(mw.col.media.dir(), filename)
+                sound.av_player.play_file(file_path)
+            else:
+                try:
+                    os.remove(os.path.join(mw.col.media.dir(), filename))
+                except Exception:
+                    pass
+
+        editor.web.evalWithCallback(
+            f"window.PowerSuite.ttsInjectAudio({safe_filename}, {target_idx});",
+            on_injected
+        )
+
+    mw.taskman.run_in_background(do_tts, on_tts_finished)
+
+
 # --- BATCH TTS WORKER (Used by Combos) ---
 def run_batch_tts_process(editor: Editor, text: str, config: Config, track_for_unwrap: bool = False):
     import random
@@ -231,6 +277,27 @@ def trigger_tts_standalone(editor: Editor):
         run_tts_process(editor, selected_text, config)
 
     editor.web.evalWithCallback("window.PowerSuite.ttsGetText()", handle_text)
+
+
+# --- TTS REGEN HOTKEY (Shift+F9) ---
+def trigger_tts_regen(editor: Editor):
+    inject_js(editor)
+    config = load_config()
+    tts_settings = config.get("tts_settings", {})
+
+    def handle_text(selected_text):
+        if not selected_text:
+            return
+        progress_msg = (
+            "Resynthesising audio..."
+            if tts_cache_exists(selected_text, tts_settings)
+            else "Synthesising audio..."
+        )
+        _start_progress(editor, progress_msg, "tts_regen")
+        run_tts_regen_process(editor, selected_text, config)
+
+    editor.web.evalWithCallback("window.PowerSuite.ttsGetText()", handle_text)
+
 
 # --- STANDALONE COMBO TTS HOTKEY (Ctrl+F9) ---
 def trigger_tts_combo_standalone(editor: Editor):
@@ -334,6 +401,7 @@ def on_setup_shortcuts(shortcuts: list[tuple], editor: Editor):
         
     if config.get("enable_tts", True):
         shortcuts.append((hotkeys.get("tts_standalone", "F9"), lambda: trigger_tts_standalone(editor)))
+        shortcuts.append((hotkeys.get("tts_regen", "Shift+F9"), lambda: trigger_tts_regen(editor)))
         if "tts_combo" in hotkeys:
             shortcuts.append((hotkeys["tts_combo"], lambda: trigger_tts_combo_standalone(editor)))
         

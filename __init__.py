@@ -3,7 +3,7 @@ import json
 import re
 from aqt import mw, gui_hooks, sound
 from aqt.editor import Editor
-from .backend.logger import wipe_log_on_init, handle_js_message, log_tooltip as tooltip
+from .backend.logger import wipe_log_on_init, handle_js_message, log_tooltip as tooltip, write_to_log
 
 from .backend.llm_pipeline import translate_via_gemini
 from .backend.tts_pipeline import generate_audio
@@ -59,17 +59,29 @@ def _start_progress(editor: Editor, message: str, lock_type: str = "unknown"):
     """Show the JS lock overlay and reset the abort flag."""
     global _abort_flag
     _abort_flag = False
+    write_to_log({
+        "type": "custom_progress_start",
+        "message": message,
+        "lock_type": lock_type
+    })
     safe_msg = json.dumps(message)
     safe_type = json.dumps(lock_type)
     editor.web.eval(f"window.PowerSuite.showLock({safe_msg}, {safe_type})")
 
 def _update_progress(editor: Editor, message: str):
     """Update the lock overlay label text."""
+    write_to_log({
+        "type": "custom_progress_update",
+        "message": message
+    })
     safe_msg = json.dumps(message)
     editor.web.eval(f"window.PowerSuite.updateLock({safe_msg})")
 
 def _finish_progress(editor: Editor):
     """Remove the lock overlay."""
+    write_to_log({
+        "type": "custom_progress_finish"
+    })
     editor.web.eval("window.PowerSuite.hideLock()")
 
 def _handle_abort_pycmd(handled, message, context):

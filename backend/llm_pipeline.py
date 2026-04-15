@@ -25,6 +25,7 @@ def list_available_models(api_key, api_base="https://generativelanguage.googleap
 from ..types import AISettings
 
 def translate_via_gemini(text: str, ai_config: AISettings, abort_check=None, on_retry=None) -> str:
+    from .logger import write_to_log
     """Pure function: takes text and config, returns text safely, with retries and fallback."""
     api_key = ai_config.get("gemini_api_key")
     if not api_key or api_key == "YOUR_API_KEY_HERE": 
@@ -74,6 +75,13 @@ def translate_via_gemini(text: str, ai_config: AISettings, abort_check=None, on_
                 with urllib.request.urlopen(req, context=ssl_context, timeout=30) as response:
                     res_data = json.loads(response.read().decode('utf-8'))
                     
+                    write_to_log({
+                        "type": "api_response_llm",
+                        "model": current_model,
+                        "attempt": attempt,
+                        "response": res_data
+                    })
+                    
                     candidates = res_data.get('candidates', [])
                     if not candidates:
                         return f"Error: No AI candidates returned. Data: {res_data}"
@@ -91,6 +99,15 @@ def translate_via_gemini(text: str, ai_config: AISettings, abort_check=None, on_
                     
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode('utf-8')
+                
+                write_to_log({
+                    "type": "api_error_llm",
+                    "model": current_model,
+                    "attempt": attempt,
+                    "status": e.code,
+                    "response": err_body
+                })
+                
                 last_error = f"HTTP Error {e.code} ({current_model}): {err_body}"
                 
                 if e.code == 404:

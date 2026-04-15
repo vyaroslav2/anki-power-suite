@@ -34,6 +34,18 @@ window.PowerSuite = window.PowerSuite || {
         break; // info
     }
     console.log(`${prefix} ${message}`, css);
+
+    try {
+      if (typeof pycmd !== "undefined") {
+        pycmd("powersuite-debug:" + JSON.stringify({
+          type: "js_log",
+          level: level,
+          message: message
+        }));
+      }
+    } catch (e) {
+      // Ignore pycmd errors if not in Anki
+    }
   },
 
   // Finds Anki's hidden editor

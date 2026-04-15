@@ -135,6 +135,26 @@ def log_tooltip(message: str, period: int = 3000, parent=None, **kwargs):
 # Globally monkey-patch Anki's tooltip so we catch system messages like 'Processing...'
 aqt.utils.tooltip = log_tooltip
 
+_original_showInfo = aqt.utils.showInfo
+_original_showWarning = aqt.utils.showWarning
+_original_showCritical = aqt.utils.showCritical
+
+def log_showInfo(text, parent=None, help=None, title="Anki", customBtns=None, **kwargs):
+    write_to_log({"type": "popup_showInfo", "message": text})
+    return _original_showInfo(text, parent=parent, help=help, title=title, customBtns=customBtns, **kwargs)
+
+def log_showWarning(text, parent=None, help=None, title="Anki", customBtns=None, **kwargs):
+    write_to_log({"type": "popup_showWarning", "message": text})
+    return _original_showWarning(text, parent=parent, help=help, title=title, customBtns=customBtns, **kwargs)
+
+def log_showCritical(text, parent=None, help=None, title="Anki", **kwargs):
+    write_to_log({"type": "popup_showCritical", "message": text})
+    return _original_showCritical(text, parent=parent, help=help, title=title, **kwargs)
+
+aqt.utils.showInfo = log_showInfo
+aqt.utils.showWarning = log_showWarning
+aqt.utils.showCritical = log_showCritical
+
 # Catch native Anki progress dialogs (like the striped "Processing..." window)
 import aqt.progress
 _original_progress_start = aqt.progress.ProgressManager.start

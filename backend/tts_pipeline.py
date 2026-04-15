@@ -18,6 +18,7 @@ def get_ssl_context():
 from ..types import TTSSettings
 
 def generate_audio(text: str, tts_config: TTSSettings, voice_override: dict = None, abort_check=None, on_retry=None) -> str:
+    from .logger import write_to_log
     """Takes pure text, fetches audio from ElevenLabs (or uses cached file), saves it, returns filename."""
     api_key = tts_config.get("elevenlabs_api_key")
     
@@ -81,12 +82,29 @@ def generate_audio(text: str, tts_config: TTSSettings, voice_override: dict = No
         try:
             req = urllib.request.Request(url, data=data, headers=headers, method="POST")
             with urllib.request.urlopen(req, context=ssl_context, timeout=60) as response:
+                res_data = response.read()
+                write_to_log({
+                    "type": "api_response_tts",
+                    "model": model_id,
+                    "attempt": attempt,
+                    "voice_id": active_voice_id,
+                    "status": response.status
+                })
                 with open(file_path, 'wb') as f:
-                    f.write(response.read())
+                    f.write(res_data)
                 return filename
 
         except urllib.error.HTTPError as e:
             err_body = e.read().decode('utf-8')
+            
+            write_to_log({
+                "type": "api_error_tts",
+                "model": model_id,
+                "attempt": attempt,
+                "voice_id": active_voice_id,
+                "status": e.code,
+                "response": err_body
+            })
             
             if e.code in retryable_codes and attempt < max_retries:
                 if e.code == 500 and attempt > 0:

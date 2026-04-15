@@ -345,6 +345,24 @@ def on_setup_shortcuts(shortcuts: list[tuple], editor: Editor):
         shortcuts.append((hotkeys["unwrap_cloze"], lambda: trigger_unwrapper(editor)))
         
 
+# --- HARD CLOSE ---
+def trigger_hard_close():
+    import os
+    tooltip("Hard closing Anki...")
+    # Kill the current instance immediately
+    os._exit(0)
+
+def on_profile_did_open():
+    from PyQt6.QtGui import QKeySequence
+    from PyQt6.QtWidgets import QShortcut
+    config = load_config()
+    hotkeys = config.get("hotkeys", {})
+    if "hard_close" in hotkeys:
+        mw.hard_close_shortcut = QShortcut(QKeySequence(hotkeys["hard_close"]), mw)
+        mw.hard_close_shortcut.activated.connect(trigger_hard_close)
+
+gui_hooks.profile_did_open.append(on_profile_did_open)
+
 gui_hooks.editor_did_init.append(on_editor_init)
 gui_hooks.editor_did_init_shortcuts.append(on_setup_shortcuts)
 gui_hooks.editor_did_init.append(wipe_log_on_init)

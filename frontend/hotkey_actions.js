@@ -105,7 +105,7 @@ window.PowerSuite.formatCurrentLine = function () {
         }
       });
 
-      frag.querySelectorAll("b, i").forEach((el) => {
+      frag.querySelectorAll("b, i, em, strong").forEach((el) => {
         if (el.textContent.trim() === "" && !el.querySelector("span"))
           el.remove();
       });
@@ -141,7 +141,7 @@ window.PowerSuite.formatCurrentLine = function () {
     const refLine =
       scope.find((l) => l.textContent.trim().length > 0) || scope[0];
     const hasIndent = indentRegex.test(refLine.innerHTML);
-    const hasItalics = refLine.querySelector("i") !== null;
+    const hasItalics = refLine.querySelector("i, em") !== null;
     const shouldUnformat =
       (hasIndent && hasItalics) || refLine.dataset[window.PowerSuite.CONSTANTS.DATA_ANKI_FMT_CAMEL] === "1";
 
@@ -160,7 +160,7 @@ window.PowerSuite.formatCurrentLine = function () {
           new RegExp(`^((?:<span class="(?:${window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_START}|${window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_END})"><\\/span>)*)(?:\\s|&nbsp;|\\u00A0)+`, "gi"),
           "$1",
         );
-        html = html.replace(/<\/?i>/gi, "");
+        html = html.replace(/<\/?(?:i|em)(?:\s+[^>]*)?>/gi, "");
       }
 
       if (!shouldUnformat) {
@@ -239,6 +239,11 @@ window.PowerSuite.formatCurrentLine = function () {
       .forEach((m) => m.remove());
     editableRoot.focus();
     window.PowerSuite.isProcessing = false;
+    
+    // Re-enforce custom styles (like making .pill Roman) after formatting
+    if (typeof window.PowerSuite.upgradeSpans === "function") {
+      window.PowerSuite.upgradeSpans();
+    }
   }
 };
 
@@ -426,10 +431,10 @@ window.PowerSuite.aiGetText = function () {
 
   window.PowerSuite.aiToken = window.PowerSuite.CONSTANTS.AI_PLACEHOLDER_PREFIX + Date.now() + window.PowerSuite.CONSTANTS.AI_PLACEHOLDER_SUFFIX;
 
-  // Strip <i> tags from cloze content so it appears roman in the editor.
+  // Strip <i> and <em> tags from cloze content so it appears roman in the editor.
   // Review-side roman is handled by .cloze { font-style: normal } in the card template.
-  // Only bare <i>/</i> tags are removed; .del spans (inline font-style) are untouched.
-  const clozeInnerHTML = innerHTML.replace(/<\/?i>/gi, "");
+  // Only bare <i>/<em> tags are removed; .del spans (inline font-style) are untouched.
+  const clozeInnerHTML = innerHTML.replace(/<\/?(?:i|em)(?:\s+[^>]*)?>/gi, "");
 
   // Build the skeleton, sandwiching the clean HTML between the extracted spacing
   const skeletonHTML = `${prefix}{{c1::${clozeInnerHTML}::${window.PowerSuite.aiToken}}}${suffix}${leftoverHTML}`;

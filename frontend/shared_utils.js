@@ -58,12 +58,12 @@ window.PowerSuite = window.PowerSuite || {
     })(document);
   },
 
-  // Passively guarantees .del styles survive Add window resets and cross-device syncs
-  enforceDelStyles: function () {
-    if (window.PowerSuite._delStylesActive) return;
-    window.PowerSuite._delStylesActive = true;
+  // Passively guarantees custom styles survive Add window resets and cross-device syncs
+  enforceCustomStyles: function () {
+    if (window.PowerSuite._customStylesActive) return;
+    window.PowerSuite._customStylesActive = true;
 
-    const upgradeSpans = () => {
+    window.PowerSuite.upgradeSpans = () => {
       const activeRoot = window.PowerSuite.getEditableRoot();
       // Fallback to the main document if the specific editor field isn't focused
       const targetNode = activeRoot ? activeRoot.getRootNode() : document;
@@ -80,26 +80,31 @@ window.PowerSuite = window.PowerSuite || {
         node.style.fontStyle = "italic";
         node.style.opacity = "0.85";
       });
+
+      targetNode.querySelectorAll(window.PowerSuite.CONSTANTS.CLASS_PILL).forEach((node) => {
+        // Ensure pills are ALWAYS Roman (non-italic), even if wrapped in <i> tags by the formatter
+        node.style.fontStyle = "normal";
+      });
     };
 
     // Fire 50ms after a paste (allows Anki to safely handle images/clipboards first)
     document.addEventListener(
       "paste",
-      () => setTimeout(upgradeSpans, 50),
+      () => setTimeout(window.PowerSuite.upgradeSpans, 50),
       true,
     );
 
     // Fire on keyup (catches scenarios where you type HTML manually and click back to the visual editor)
     document.addEventListener(
       "keyup",
-      () => setTimeout(upgradeSpans, 50),
+      () => setTimeout(window.PowerSuite.upgradeSpans, 50),
       true,
     );
   },
 };
 
 // Initialize the style enforcer immediately when the editor loads
-window.PowerSuite.enforceDelStyles();
+window.PowerSuite.enforceCustomStyles();
 
 // --- Processing Lock Overlay ---
 // Replaces mw.progress to avoid Qt focus stealing and popup flicker.

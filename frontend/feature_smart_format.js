@@ -183,8 +183,11 @@ window.PowerSuite.initSmartFormat = function () {
           ? rootNode.getSelection()
           : window.getSelection();
 
-        // Only trigger if NO text is currently highlighted
-        if (sel && sel.rangeCount > 0 && sel.isCollapsed) {
+        // Only trigger if NO text is currently highlighted.
+        // sel.isCollapsed alone is unreliable inside Anki's shadow-DOM editor;
+        // double-check with sel.toString() and range.collapsed.
+        const range0 = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+        if (range0 && range0.collapsed && sel.toString().length === 0) {
           let target = sel.anchorNode;
           if (!target) return;
 
@@ -203,9 +206,32 @@ window.PowerSuite.initSmartFormat = function () {
 
           if (blockElement && blockElement !== editableRoot) {
             const range = document.createRange();
-            range.selectNode(blockElement); // Highlight the entire line block instantly
+            
+            // To truly remove the line (not just empty it), we must select across block boundaries.
+            if (blockElement.nextSibling) {
+              range.setStartBefore(blockElement);
+              range.setEndBefore(blockElement.nextSibling);
+            } else if (blockElement.previousSibling) {
+              range.setStartAfter(blockElement.previousSibling);
+              range.setEndAfter(blockElement);
+            } else {
+              range.selectNode(blockElement);
+            }
+
             sel.removeAllRanges();
             sel.addRange(range);
+            
+            // In some environments, native cut on a cross-block selection leaves an empty block.
+            // We can listen for the immediate 'cut' event to clean it up.
+            const cleanupCut = (cutEvent) => {
+              editableRoot.removeEventListener("cut", cleanupCut);
+              setTimeout(() => {
+                 if (blockElement && blockElement.parentNode && blockElement.textContent.trim() === "") {
+                    blockElement.remove();
+                 }
+              }, 10);
+            };
+            editableRoot.addEventListener("cut", cleanupCut);
 
             window.PowerSuite.log(
               "Line selected for VS Code style Cut.",

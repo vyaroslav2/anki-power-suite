@@ -3,6 +3,7 @@
   "enable_smart_trim": true,
   "enable_ai_translator": true,
   "enable_tts": true,
+  "enable_audio_check": true,
   "hotkeys": {
     "line_formatter": "Alt+Shift+Q",
     "ai_translator": "F8",

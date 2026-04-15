@@ -23,6 +23,7 @@ class Config(TypedDict, total=False):
     enable_smart_trim: bool
     enable_ai_translator: bool
     enable_tts: bool
+    enable_audio_check: bool
     hotkeys: dict
     ai_settings: AISettings
     tts_settings: TTSSettings

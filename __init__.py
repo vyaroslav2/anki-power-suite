@@ -429,10 +429,56 @@ def on_profile_did_open():
         mw.hard_close_shortcut = QShortcut(QKeySequence(hotkeys["hard_close"]), mw)
         mw.hard_close_shortcut.activated.connect(trigger_hard_close)
 
+
+def _note_has_audio(note) -> bool:
+    """Return True if any note field contains at least one [sound:...] tag."""
+    for field_html in note.fields:
+        if field_html and re.search(r"\[sound:[^\]]+\]", field_html):
+            return True
+    return False
+
+
+def _confirm_add_without_audio(addcards) -> bool:
+    from aqt.qt import QMessageBox
+
+    dialog = QMessageBox(addcards)
+    dialog.setIcon(QMessageBox.Icon.Question)
+    dialog.setWindowTitle("Anki")
+    dialog.setText("This note does not contain audio. Proceed?")
+    add_button = dialog.addButton("Yes", QMessageBox.ButtonRole.AcceptRole)
+    keep_editing_button = dialog.addButton("No", QMessageBox.ButtonRole.RejectRole)
+    dialog.setDefaultButton(keep_editing_button)
+    dialog.setEscapeButton(keep_editing_button)
+
+    dialog.exec()
+    return dialog.clickedButton() == add_button
+
+
+def on_add_cards_init(addcards):
+    config = load_config()
+    if not config.get("enable_audio_check", True):
+        return
+
+    if getattr(addcards, "_ps_audio_check_patched", False):
+        return
+
+    original_note_check = addcards._note_can_be_added
+
+    def patched_note_check(note):
+        if not original_note_check(note):
+            return False
+        if _note_has_audio(note):
+            return True
+        return _confirm_add_without_audio(addcards)
+
+    addcards._note_can_be_added = patched_note_check
+    addcards._ps_audio_check_patched = True
+
 gui_hooks.profile_did_open.append(on_profile_did_open)
 
 gui_hooks.editor_did_init.append(on_editor_init)
 gui_hooks.editor_did_init_shortcuts.append(on_setup_shortcuts)
 gui_hooks.editor_did_init.append(wipe_log_on_init)
+gui_hooks.add_cards_did_init.append(on_add_cards_init)
 gui_hooks.webview_did_receive_js_message.append(handle_js_message)
 gui_hooks.webview_did_receive_js_message.append(_handle_abort_pycmd)

@@ -15,7 +15,9 @@ def get_ssl_context():
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
-def generate_audio(text: str, tts_config: dict, voice_override: dict = None, abort_check=None, on_retry=None) -> str:
+from ..types import TTSSettings
+
+def generate_audio(text: str, tts_config: TTSSettings, voice_override: dict = None, abort_check=None, on_retry=None) -> str:
     """Takes pure text, fetches audio from ElevenLabs (or uses cached file), saves it, returns filename."""
     api_key = tts_config.get("elevenlabs_api_key")
     

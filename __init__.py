@@ -13,6 +13,9 @@ CONFIG_PATH = os.path.join(ADDON_PATH, "config.json")
 UTILS_JS_PATH = os.path.join(ADDON_PATH, "frontend", "shared_utils.js")
 ACTIONS_JS_PATH = os.path.join(ADDON_PATH, "frontend", "hotkey_actions.js")
 PASSIVE_JS_PATH = os.path.join(ADDON_PATH, "frontend", "passive_listeners.js")
+AUTO_INDENT_JS_PATH = os.path.join(ADDON_PATH, "frontend", "feature_auto_indent.js")
+SMART_FORMAT_JS_PATH = os.path.join(ADDON_PATH, "frontend", "feature_smart_format.js")
+MOUSE_TRIMMER_JS_PATH = os.path.join(ADDON_PATH, "frontend", "feature_mouse_trimmer.js")
 DEBUG_JS_PATH = os.path.join(ADDON_PATH, "frontend", "debugger_flight_recorder.js")
 
 def load_config():
@@ -33,7 +36,9 @@ def inject_js(editor: Editor, include_passive=False):
         
         passive_js = ""
         if include_passive and config.get("enable_smart_trim", False):
-            with open(PASSIVE_JS_PATH, "r", encoding="utf-8") as f: passive_js = f.read()
+            with open(AUTO_INDENT_JS_PATH, "r", encoding="utf-8") as f: passive_js += f.read() + "\n"
+            with open(SMART_FORMAT_JS_PATH, "r", encoding="utf-8") as f: passive_js += f.read() + "\n"
+            with open(MOUSE_TRIMMER_JS_PATH, "r", encoding="utf-8") as f: passive_js += f.read() + "\n"
             
         # Add debug_js to the eval string
         editor.web.eval(f"{utils_js}\n{passive_js}\n{actions_js}\n{debug_js}")
@@ -88,7 +93,9 @@ def _create_retry_callback(editor: Editor):
 
 
 # --- CORE TTS WORKER (Used by both Standalone and Combo) ---
-def run_tts_process(editor: Editor, text: str, config: dict):
+from .types import Config, TTSSettings, AISettings
+
+def run_tts_process(editor: Editor, text: str, config: Config):
     tts_settings = config.get("tts_settings", {})
     on_retry = _create_retry_callback(editor)
     
@@ -129,7 +136,7 @@ def run_tts_process(editor: Editor, text: str, config: dict):
 
 
 # --- BATCH TTS WORKER (Used by Combos) ---
-def run_batch_tts_process(editor: Editor, text: str, config: dict, track_for_unwrap: bool = False):
+def run_batch_tts_process(editor: Editor, text: str, config: Config, track_for_unwrap: bool = False):
     import random
     tts_settings = config.get("tts_settings", {})
     voice_pool = tts_settings.get("voice_pool", [])

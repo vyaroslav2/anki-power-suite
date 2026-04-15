@@ -28,9 +28,9 @@ window.PowerSuite.formatCurrentLine = function () {
 
     const range = sel.getRangeAt(0);
     const startMarker = document.createElement("span");
-    startMarker.className = "anki-fmt-start";
+    startMarker.className = window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_START;
     const endMarker = document.createElement("span");
-    endMarker.className = "anki-fmt-end";
+    endMarker.className = window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_END;
 
     const sRange = range.cloneRange();
     sRange.collapse(true);
@@ -120,8 +120,8 @@ window.PowerSuite.formatCurrentLine = function () {
 
     normalize(editableRoot);
 
-    const sMarker = editableRoot.querySelector(".anki-fmt-start");
-    const eMarker = editableRoot.querySelector(".anki-fmt-end");
+    const sMarker = editableRoot.querySelector("." + window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_START);
+    const eMarker = editableRoot.querySelector("." + window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_END);
     if (!sMarker || !eMarker)
       throw new Error("Markers lost during normalization");
 
@@ -143,7 +143,7 @@ window.PowerSuite.formatCurrentLine = function () {
     const hasIndent = indentRegex.test(refLine.innerHTML);
     const hasItalics = refLine.querySelector("i") !== null;
     const shouldUnformat =
-      (hasIndent && hasItalics) || refLine.dataset.ankiFmt === "1";
+      (hasIndent && hasItalics) || refLine.dataset[window.PowerSuite.CONSTANTS.DATA_ANKI_FMT_CAMEL] === "1";
 
     scope.forEach((line) => {
       if (line.nodeType !== 1) return;
@@ -157,7 +157,7 @@ window.PowerSuite.formatCurrentLine = function () {
       while (html !== lastHtml) {
         lastHtml = html;
         html = html.replace(
-          /^((?:<span class="anki-fmt-(?:start|end)"><\/span>)*)(?:\s|&nbsp;|\u00A0)+/gi,
+          new RegExp(`^((?:<span class="(?:${window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_START}|${window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_END})"><\\/span>)*)(?:\\s|&nbsp;|\\u00A0)+`, "gi"),
           "$1",
         );
         html = html.replace(/<\/?i>/gi, "");
@@ -201,13 +201,13 @@ window.PowerSuite.formatCurrentLine = function () {
           }
 
           line.innerHTML = `${indent}<i>${targetHtml}</i>${leftoverHtml}`;
-          line.dataset.ankiFmt = "1";
+          line.dataset[window.PowerSuite.CONSTANTS.DATA_ANKI_FMT_CAMEL] = "1";
         } else {
           line.innerHTML = html;
         }
       } else {
         line.innerHTML = html;
-        delete line.dataset.ankiFmt;
+        delete line.dataset[window.PowerSuite.CONSTANTS.DATA_ANKI_FMT_CAMEL];
       }
 
       if (line.innerHTML.trim() === "") line.innerHTML = "<br>";
@@ -222,8 +222,8 @@ window.PowerSuite.formatCurrentLine = function () {
       window.PowerSuite.log("FORMATTER ERROR: " + e, "error");
     }
   } finally {
-    const finalStart = editableRoot.querySelector(".anki-fmt-start");
-    const finalEnd = editableRoot.querySelector(".anki-fmt-end");
+    const finalStart = editableRoot.querySelector("." + window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_START);
+    const finalEnd = editableRoot.querySelector("." + window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_END);
     if (finalStart && finalEnd && sel) {
       try {
         const finalRange = document.createRange();
@@ -235,7 +235,7 @@ window.PowerSuite.formatCurrentLine = function () {
     }
 
     editableRoot
-      .querySelectorAll(".anki-fmt-start, .anki-fmt-end")
+      .querySelectorAll(`.${window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_START}, .${window.PowerSuite.CONSTANTS.CLASS_ANKI_FMT_END}`)
       .forEach((m) => m.remove());
     editableRoot.focus();
     window.PowerSuite.isProcessing = false;
@@ -421,10 +421,10 @@ window.PowerSuite.aiGetText = function () {
   const divForText = document.createElement("div");
   divForText.innerHTML = innerHTML;
   // Remove .pill elements so grammar-note badges don't pollute the AI prompt
-  divForText.querySelectorAll(".pill").forEach((el) => el.remove());
+  divForText.querySelectorAll(window.PowerSuite.CONSTANTS.CLASS_PILL).forEach((el) => el.remove());
   const cleanTextForAI = divForText.textContent || divForText.innerText || "";
 
-  window.PowerSuite.aiToken = "[[AI_TRANSLATING_" + Date.now() + "]]";
+  window.PowerSuite.aiToken = window.PowerSuite.CONSTANTS.AI_PLACEHOLDER_PREFIX + Date.now() + window.PowerSuite.CONSTANTS.AI_PLACEHOLDER_SUFFIX;
 
   // Strip <i> tags from cloze content so it appears roman in the editor.
   // Review-side roman is handled by .cloze { font-style: normal } in the card template.
@@ -527,7 +527,7 @@ window.PowerSuite.reconstructCloze = function (text) {
   // 0. Strip .pill spans via DOM so grammar-note badges don't reach TTS
   const tmpDiv = document.createElement("div");
   tmpDiv.innerHTML = text;
-  tmpDiv.querySelectorAll(".pill").forEach((el) => el.remove());
+  tmpDiv.querySelectorAll(window.PowerSuite.CONSTANTS.CLASS_PILL).forEach((el) => el.remove());
   text = tmpDiv.innerHTML;
 
   // 1. Strip everything in parentheses (grammar annotations)
@@ -583,14 +583,14 @@ window.PowerSuite.ttsGetText = function () {
   if (!raw.trim()) {
     isAutoExpanded = true;
     const clone = blockElement.cloneNode(true);
-    clone.querySelectorAll(".pill").forEach((el) => el.remove());
+    clone.querySelectorAll(window.PowerSuite.CONSTANTS.CLASS_PILL).forEach((el) => el.remove());
     extractedText = clone.innerText || clone.textContent || "";
   } else {
     // Manual selection: clone the fragment, strip .pill, then read text
     const frag = sel.getRangeAt(0).cloneContents();
     const wrapper = document.createElement("div");
     wrapper.appendChild(frag);
-    wrapper.querySelectorAll(".pill").forEach((el) => el.remove());
+    wrapper.querySelectorAll(window.PowerSuite.CONSTANTS.CLASS_PILL).forEach((el) => el.remove());
     extractedText = wrapper.textContent || "";
   }
   if (!extractedText.trim()) return "";
@@ -648,7 +648,7 @@ window.PowerSuite.ttsInjectAudio = function (filenamePayload, targetIndex, track
   // 2. SECURE THE MAP: Attach the filename strictly to the line for Unwrap
   if (window.PowerSuite.comboActiveLine && trackForUnwrap !== false) {
     window.PowerSuite.comboActiveLine.setAttribute(
-      "data-combo-audio",
+      window.PowerSuite.CONSTANTS.DATA_COMBO_AUDIO,
       JSON.stringify(filenames)
     );
     window.PowerSuite.comboActiveLine = null; // Clear the tracker immediately
@@ -702,10 +702,10 @@ window.PowerSuite.unwrapCloze = function () {
     const unwrapRegex = /\{\{c\d+::(.*?)(?:::.*?)?\}\}/g;
     if (unwrapRegex.test(html)) {
       // 3. READ THE MAP: Extract the Combo audio filename BEFORE replacing HTML
-      if (block.hasAttribute("data-combo-audio")) {
+      if (block.hasAttribute(window.PowerSuite.CONSTANTS.DATA_COMBO_AUDIO)) {
         window.PowerSuite.pendingComboKill =
-          block.getAttribute("data-combo-audio");
-        block.removeAttribute("data-combo-audio");
+          block.getAttribute(window.PowerSuite.CONSTANTS.DATA_COMBO_AUDIO);
+        block.removeAttribute(window.PowerSuite.CONSTANTS.DATA_COMBO_AUDIO);
       }
 
       const range = document.createRange();
@@ -715,7 +715,7 @@ window.PowerSuite.unwrapCloze = function () {
 
       // Re-wrap in <i> on unwrap only if the line was formatted (data-anki-fmt="1").
       // This preserves perfect italic+indent formatting for copy-paste to subsequent cards.
-      const shouldItalicise = block.dataset.ankiFmt === "1";
+      const shouldItalicise = block.dataset[window.PowerSuite.CONSTANTS.DATA_ANKI_FMT_CAMEL] === "1";
       document.execCommand(
         "insertHTML",
         false,

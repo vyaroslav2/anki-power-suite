@@ -1,4 +1,17 @@
 window.PowerSuite = window.PowerSuite || {
+  CONSTANTS: {
+    AI_PLACEHOLDER_PREFIX: "[[AI_TRANSLATING_",
+    AI_PLACEHOLDER_SUFFIX: "]]",
+    DATA_COMBO_AUDIO: "data-combo-audio",
+    DATA_ANKI_FMT: "data-anki-fmt",
+    DATA_ANKI_FMT_CAMEL: "ankiFmt",
+    CLASS_PILL: ".pill",
+    CLASS_DEL: ".del",
+    CLASS_ANKI_FMT_START: "anki-fmt-start",
+    CLASS_ANKI_FMT_END: "anki-fmt-end",
+    ID_LOCK_OVERLAY: "ps-lock-overlay",
+    ID_LOCK_LABEL: "ps-lock-label",
+  },
   isProcessing: false,
 
   // Professional Centralized Logging
@@ -43,7 +56,7 @@ window.PowerSuite = window.PowerSuite || {
       // Fallback to the main document if the specific editor field isn't focused
       const targetNode = activeRoot ? activeRoot.getRootNode() : document;
 
-      targetNode.querySelectorAll("span.del").forEach((node) => {
+      targetNode.querySelectorAll("span" + window.PowerSuite.CONSTANTS.CLASS_DEL).forEach((node) => {
         // Unconditionally overwrite all styles to guarantee an exact visual match.
         // Anki's clipboard parser often strips 'opacity' and complex RGBA colors
         // while preserving other properties, so we must re-burn them all every time.
@@ -84,7 +97,7 @@ window.PowerSuite.showLock = function (message, lockType) {
   window.PowerSuite._lockType = lockType || "unknown";
 
   const overlay = document.createElement("div");
-  overlay.id = "ps-lock-overlay";
+  overlay.id = window.PowerSuite.CONSTANTS.ID_LOCK_OVERLAY;
   overlay.style.cssText =
     "position:fixed;top:0;left:0;width:100%;height:100%;z-index:99999;background:transparent;";
   overlay.addEventListener(
@@ -97,7 +110,7 @@ window.PowerSuite.showLock = function (message, lockType) {
   );
 
   const pill = document.createElement("div");
-  pill.id = "ps-lock-label";
+  pill.id = window.PowerSuite.CONSTANTS.ID_LOCK_LABEL;
   pill.style.cssText =
     "position:fixed;top:8px;left:50%;transform:translateX(-50%);" +
     "background:rgba(30,30,30,0.9);color:#ccc;padding:6px 18px;border-radius:20px;" +
@@ -127,13 +140,13 @@ window.PowerSuite.showLock = function (message, lockType) {
 };
 
 window.PowerSuite.updateLock = function (message) {
-  var label = document.getElementById("ps-lock-label");
+  var label = document.getElementById(window.PowerSuite.CONSTANTS.ID_LOCK_LABEL);
   if (label) label.textContent = message;
 };
 
 window.PowerSuite.hideLock = function () {
-  var overlay = document.getElementById("ps-lock-overlay");
-  var label = document.getElementById("ps-lock-label");
+  var overlay = document.getElementById(window.PowerSuite.CONSTANTS.ID_LOCK_OVERLAY);
+  var label = document.getElementById(window.PowerSuite.CONSTANTS.ID_LOCK_LABEL);
   if (overlay) overlay.remove();
   if (label) label.remove();
   if (window.PowerSuite._lockKeyHandler) {

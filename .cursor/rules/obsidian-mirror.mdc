@@ -1,0 +1,20 @@
+---
+description: Mirror every agent response to a local Markdown file for Obsidian
+alwaysApply: true
+---
+
+# The Obsidian Mirror
+
+As the **final step of every turn**, write the exact human-readable content of your response to:
+
+```
+C:\Users\vyaro\OneDrive\Рабочий стол\NewObsidian\Cursor_Latest_Response.md
+```
+
+## Rules
+
+1. **Verbatim copy** — the mirror file must be a **full, word-for-word copy** of the entire chat message shown to the user. Do NOT summarize, condense, or omit any section. If it appears in the chat, it appears in the file.
+2. **No internal monologue** — do NOT include `<thought>` tags or any thinking process.
+3. **Overwrite mode** — always overwrite the file contents completely (do not append).
+4. **Tool order** — the `Write` call for this mirror MUST be the very last tool call in the turn.
+5. **Obsidian compatibility** — preserve standard Markdown formatting for optimal viewing in Obsidian.

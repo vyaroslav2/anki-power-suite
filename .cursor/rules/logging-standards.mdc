@@ -1,0 +1,48 @@
+---
+description: Enforce logging of all API responses, popup messages, and system events
+globs: **/*.{py,js}
+alwaysApply: false
+---
+
+# Logging Standards
+
+Always log important system events, external API responses, and user-facing popup messages using the flight recorder (`write_to_log` in Python or `window.PowerSuite.log` in JS). 
+
+This is critical for debugging issues and understanding the addon's internal state.
+
+## Python Backend
+Use `write_to_log` from `backend.logger` to record events.
+
+```python
+# ❌ BAD
+def show_error(msg):
+    aqt.utils.showInfo(msg)
+
+# ✅ GOOD
+from .logger import write_to_log
+
+def show_error(msg):
+    write_to_log({"type": "popup_showInfo", "message": msg})
+    aqt.utils.showInfo(msg)
+```
+
+```python
+# ✅ GOOD - Logging API Responses
+write_to_log({
+    "type": "api_response_llm",
+    "model": current_model,
+    "attempt": attempt,
+    "response": res_data
+})
+```
+
+## Frontend JS
+Use `window.PowerSuite.log` for frontend logging.
+
+```javascript
+// ❌ BAD
+console.log("AI Placeholder injected.");
+
+// ✅ GOOD
+window.PowerSuite.log("AI Placeholder injected.", "info");
+```

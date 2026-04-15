@@ -1,0 +1,14 @@
+# Power-Anki-Suite Architecture & Rules
+
+## Project Overview
+A custom Anki add-on integrating Gemini API (Translation/Cloze) and ElevenLabs API (TTS). Uses a Python backend for orchestration/PyCmd bridges, and a vanilla JavaScript frontend for complex Shadow DOM manipulation inside Anki's contenteditable webview.
+
+## CRITICAL "Do Not Touch" Rules
+1. UI Locking: NEVER use Anki's native `mw.progress` to lock the UI during editor operations (it steals focus and causes flickering). ALWAYS use the custom JS overlay lock via `_start_progress()`, `_update_progress()`, and `_finish_progress()` from `__init__.py`.
+2. Abort State: All async Python tasks MUST poll `_abort_flag`. If the JS overlay sends `ps__abort` via pycmd, Python must safely terminate.
+3. Anki Undo Stack (Ctrl+Z): NEVER use `element.innerHTML = ...` to insert text (breaks the Undo stack). ALWAYS use `document.execCommand('insertText', false, ...)` or `insertHTML`. 
+4. Audio Injection Exception: ONLY when injecting background `[sound:...]` tags should you use `innerHTML`. Using `execCommand` for audio tags causes the cursor to jump.
+5. DOM Event Dispatching: Any programmatic DOM modification MUST dispatch an InputEvent: `el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }))`.
+6. HTML Protection: `aiGetText()` must preserve elements like `<span class="del">` and `<span class="pill">`. Elements matching `.pill` must be stripped BEFORE sending text to Gemini/ElevenLabs.
+7. Cloze Formatting: Strip `<i>` tags *inside* generated cloze payloads. On unwrap (`unwrapCloze`), re-apply `<i>` wrappers ONLY IF the block contains `data-anki-fmt="1"`.
+8. Combo Audio Mapping: Multi-voice batch TTS saves filenames to `data-combo-audio`. `unwrapCloze` reads this to safely delete ONLY AI audio, leaving manual F9 audio untouched.

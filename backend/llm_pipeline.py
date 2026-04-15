@@ -22,7 +22,9 @@ def list_available_models(api_key, api_base="https://generativelanguage.googleap
     except Exception as e:
         return f"Error listing models: {str(e)}"
 
-def translate_via_gemini(text: str, ai_config: dict, abort_check=None, on_retry=None) -> str:
+from ..types import AISettings
+
+def translate_via_gemini(text: str, ai_config: AISettings, abort_check=None, on_retry=None) -> str:
     """Pure function: takes text and config, returns text safely, with retries and fallback."""
     api_key = ai_config.get("gemini_api_key")
     if not api_key or api_key == "YOUR_API_KEY_HERE": 
